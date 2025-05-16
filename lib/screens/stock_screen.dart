@@ -115,14 +115,13 @@ class _StockScreenState extends State<StockScreen> {
                   final productoExistente = productos.firstWhere(
                     (p) =>
                         p.nombre.toLowerCase() == nombreProducto.toLowerCase(),
-                    orElse:
-                        () => Producto(
-                          nombre: nombreProducto,
-                          precioCompra: precioCompra,
-                          precioVenta: 0.0,
-                          miStock: 0,
-                          stockNildo: 0,
-                        ),
+                    orElse: () => Producto(
+                      nombre: nombreProducto,
+                      precioCompra: precioCompra,
+                      precioVenta: 0.0,
+                      miStock: 0,
+                      stockNildo: 0,
+                    ),
                   );
                   if (!productos.contains(productoExistente)) {
                     if (propietario == "Yo") {
@@ -163,26 +162,26 @@ class _StockScreenState extends State<StockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FB),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Gestión de Stock',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+          style: Theme.of(context).textTheme.titleLarge,
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16, top: 8),
             child: ElevatedButton.icon(
               onPressed: _showAddStockDialog,
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text(
+              icon: Icon(Icons.add, color: Theme.of(context).iconTheme.color),
+              label: Text(
                 '+ Añadir Stock',
-                style: TextStyle(color: Colors.white),
+                style: Theme.of(context).textTheme.bodyLarge,
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
+                backgroundColor: Theme.of(context).primaryColor,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -198,12 +197,14 @@ class _StockScreenState extends State<StockScreen> {
       ),
       body: Card(
         margin: const EdgeInsets.all(16),
+        color: Theme.of(context).cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
             columnSpacing: 24,
-            headingRowColor: MaterialStateProperty.all(const Color(0xFFF3F4F6)),
+            headingRowColor: MaterialStateProperty.all(
+                Theme.of(context).dividerColor.withOpacity(0.2)),
             columns: const [
               DataColumn(
                 label: Text(
@@ -242,34 +243,39 @@ class _StockScreenState extends State<StockScreen> {
                 ),
               ),
             ],
-            rows:
-                productos.map((p) {
-                  return DataRow(
-                    cells: [
-                      DataCell(
-                        GestureDetector(
-                          onTap: () => _goToDetalleProducto(p),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                p.nombre,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
+            rows: productos.map((p) {
+              return DataRow(
+                cells: [
+                  DataCell(
+                    GestureDetector(
+                      onTap: () => _goToDetalleProducto(p),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            p.nombre,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyLarge
+                                ?.copyWith(fontWeight: FontWeight.bold),
                           ),
-                        ),
+                        ],
                       ),
-                      DataCell(Text('${p.stockTotal}')),
-                      DataCell(Text('${p.miStock}')),
-                      DataCell(Text('${p.stockNildo}')),
-                      DataCell(Text('\$${p.precioCompra}')),
-                      DataCell(Text('\$${p.precioVenta}')),
-                    ],
-                  );
-                }).toList(),
+                    ),
+                  ),
+                  DataCell(Text('${p.stockTotal}',
+                      style: Theme.of(context).textTheme.bodyLarge)),
+                  DataCell(Text('${p.miStock}',
+                      style: Theme.of(context).textTheme.bodyLarge)),
+                  DataCell(Text('${p.stockNildo}',
+                      style: Theme.of(context).textTheme.bodyLarge)),
+                  DataCell(Text('\$24${p.precioCompra}',
+                      style: Theme.of(context).textTheme.bodyLarge)),
+                  DataCell(Text('\$24${p.precioVenta}',
+                      style: Theme.of(context).textTheme.bodyLarge)),
+                ],
+              );
+            }).toList(),
           ),
         ),
       ),

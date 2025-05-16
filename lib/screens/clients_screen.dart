@@ -234,13 +234,13 @@ class _ClientsScreenState extends State<ClientsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FB),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
+        title: Text(
           'Clientes',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          style: Theme.of(context).textTheme.titleLarge,
         ),
         actions: [
           Padding(
@@ -273,17 +273,16 @@ class _ClientsScreenState extends State<ClientsScreen> {
                   Icon(
                     Icons.people_outline,
                     size: 64,
-                    color: Colors.grey[400],
+                    color: Theme.of(context).iconTheme.color?.withOpacity(0.3),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     _filtroActual == FiltroClientes.potenciales
                         ? 'No hay clientes potenciales aún'
                         : 'No hay clientes',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Colors.grey[600],
-                    ),
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: Theme.of(context).textTheme.bodyMedium?.color,
+                        ),
                   ),
                 ],
               ),
@@ -300,8 +299,8 @@ class _ClientsScreenState extends State<ClientsScreen> {
                   margin: const EdgeInsets.only(bottom: 16),
                   elevation: 2,
                   color: cliente.esPotencial
-                      ? const Color(0xFFE3F0FF)
-                      : Colors.white,
+                      ? Theme.of(context).primaryColor.withOpacity(0.08)
+                      : Theme.of(context).cardColor,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -322,13 +321,16 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                       Container(
                                         padding: const EdgeInsets.all(8),
                                         decoration: BoxDecoration(
-                                          color: Colors.blue.withOpacity(0.1),
+                                          color: Theme.of(context)
+                                              .primaryColor
+                                              .withOpacity(0.08),
                                           borderRadius:
                                               BorderRadius.circular(12),
                                         ),
-                                        child: const Icon(
+                                        child: Icon(
                                           Icons.person,
-                                          color: Colors.blue,
+                                          color:
+                                              Theme.of(context).iconTheme.color,
                                           size: 24,
                                         ),
                                       ),
@@ -336,16 +338,14 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                       Expanded(
                                         child: Text(
                                           cliente.nombre,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 18,
-                                          ),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleLarge,
                                         ),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 12),
-                                  // WhatsApp y número en la misma fila, toda el área es táctil
                                   if (isPhone)
                                     GestureDetector(
                                       onTap: () async {
@@ -366,24 +366,27 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                           Container(
                                             padding: const EdgeInsets.all(8),
                                             decoration: BoxDecoration(
-                                              color:
-                                                  Colors.green.withOpacity(0.1),
+                                              color: const Color(0xFF67C3F3)
+                                                  .withOpacity(0.12),
                                               borderRadius:
                                                   BorderRadius.circular(12),
                                             ),
-                                            child: const FaIcon(
+                                            child: FaIcon(
                                               FontAwesomeIcons.whatsapp,
-                                              color: Colors.green,
+                                              color: Theme.of(context)
+                                                          .brightness ==
+                                                      Brightness.dark
+                                                  ? Color(0xFF67C3F3)
+                                                  : Color(0xFF25D366),
                                               size: 22,
                                             ),
                                           ),
                                           const SizedBox(width: 12),
                                           Text(
                                             cliente.contacto,
-                                            style: const TextStyle(
-                                              color: Colors.grey,
-                                              fontSize: 16,
-                                            ),
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyLarge,
                                           ),
                                         ],
                                       ),
@@ -394,23 +397,27 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                         Container(
                                           padding: const EdgeInsets.all(8),
                                           decoration: BoxDecoration(
-                                            color: Colors.grey.withOpacity(0.1),
+                                            color: Theme.of(context)
+                                                .iconTheme
+                                                .color
+                                                ?.withOpacity(0.08),
                                             borderRadius:
                                                 BorderRadius.circular(12),
                                           ),
-                                          child: const Icon(
+                                          child: Icon(
                                             Icons.phone,
-                                            color: Colors.grey,
+                                            color: Theme.of(context)
+                                                .iconTheme
+                                                .color,
                                             size: 20,
                                           ),
                                         ),
                                         const SizedBox(width: 12),
                                         Text(
                                           cliente.contacto,
-                                          style: const TextStyle(
-                                            color: Colors.grey,
-                                            fontSize: 16,
-                                          ),
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyLarge,
                                         ),
                                       ],
                                     ),
@@ -421,13 +428,18 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                         Container(
                                           padding: const EdgeInsets.all(8),
                                           decoration: BoxDecoration(
-                                            color: Colors.grey.withOpacity(0.1),
+                                            color: Theme.of(context)
+                                                .iconTheme
+                                                .color
+                                                ?.withOpacity(0.08),
                                             borderRadius:
                                                 BorderRadius.circular(12),
                                           ),
-                                          child: const Icon(
+                                          child: Icon(
                                             Icons.email,
-                                            color: Colors.grey,
+                                            color: Theme.of(context)
+                                                .iconTheme
+                                                .color,
                                             size: 20,
                                           ),
                                         ),
@@ -435,10 +447,9 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                         Expanded(
                                           child: Text(
                                             cliente.email!,
-                                            style: const TextStyle(
-                                              color: Colors.grey,
-                                              fontSize: 16,
-                                            ),
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyMedium,
                                           ),
                                         ),
                                       ],
@@ -455,12 +466,13 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 12, vertical: 6),
                                   decoration: BoxDecoration(
-                                    color: _getColorEstado(cliente.estadoPago)
-                                        .withOpacity(0.1),
+                                    color: _getColorEstado(
+                                            cliente.estadoPago, context)
+                                        .withOpacity(0.12),
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
-                                      color:
-                                          _getColorEstado(cliente.estadoPago),
+                                      color: _getColorEstado(
+                                          cliente.estadoPago, context),
                                       width: 1,
                                     ),
                                   ),
@@ -470,8 +482,8 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                         .split('.')
                                         .last,
                                     style: TextStyle(
-                                      color:
-                                          _getColorEstado(cliente.estadoPago),
+                                      color: _getColorEstado(
+                                          cliente.estadoPago, context),
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
@@ -485,24 +497,25 @@ class _ClientsScreenState extends State<ClientsScreen> {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.grey.withOpacity(0.05),
+                              color: Theme.of(context)
+                                  .iconTheme
+                                  .color
+                                  ?.withOpacity(0.04),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Row(
                               children: [
-                                const Icon(
+                                Icon(
                                   Icons.note,
-                                  color: Colors.grey,
+                                  color: Theme.of(context).iconTheme.color,
                                   size: 20,
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
                                     cliente.notas!,
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 14,
-                                    ),
+                                    style:
+                                        Theme.of(context).textTheme.bodyMedium,
                                   ),
                                 ),
                               ],
@@ -516,17 +529,21 @@ class _ClientsScreenState extends State<ClientsScreen> {
                             TextButton.icon(
                               onPressed: () =>
                                   _mostrarDialogoActualizarEstado(cliente),
-                              icon: const Icon(Icons.update),
+                              icon: Icon(Icons.update,
+                                  color: Theme.of(context).iconTheme.color),
                               label: const Text('Actualizar Estado'),
                               style: TextButton.styleFrom(
-                                foregroundColor: Colors.blue,
+                                foregroundColor: Theme.of(context).primaryColor,
                               ),
                             ),
                             const SizedBox(width: 8),
                             IconButton(
                               onPressed: () => _mostrarDialogoEliminar(cliente),
-                              icon: const Icon(Icons.delete_outline),
-                              color: Colors.red,
+                              icon: Icon(Icons.delete_outline,
+                                  color: Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? Color(0xFFE53935)
+                                      : Colors.red),
                             ),
                           ],
                         ),
@@ -540,19 +557,25 @@ class _ClientsScreenState extends State<ClientsScreen> {
         onPressed: _mostrarDialogoNuevoCliente,
         icon: const Icon(Icons.add),
         label: const Text('Nuevo Cliente'),
-        backgroundColor: Colors.blue,
+        backgroundColor: Theme.of(context).primaryColor,
       ),
     );
   }
 
-  Color _getColorEstado(EstadoPago estado) {
+  Color _getColorEstado(EstadoPago estado, BuildContext context) {
     switch (estado) {
       case EstadoPago.pendiente:
-        return Colors.orange;
+        return Theme.of(context).brightness == Brightness.dark
+            ? Color(0xFFFBC02D)
+            : Colors.orange;
       case EstadoPago.senalado:
-        return Colors.blue;
+        return Theme.of(context).brightness == Brightness.dark
+            ? Color(0xFF2196F3)
+            : Colors.blue;
       case EstadoPago.pagado:
-        return Colors.green;
+        return Theme.of(context).brightness == Brightness.dark
+            ? Color(0xFF2E7D32)
+            : Colors.green;
     }
   }
 }

@@ -15,14 +15,66 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData darkTheme = ThemeData.dark().copyWith(
+      scaffoldBackgroundColor: const Color(0xFF0D1117),
+      cardColor: const Color(0xFF161B22),
+      primaryColor: const Color(0xFF1E88E5),
+      dividerColor: const Color(0xFF2C3A4A),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFF0D1117),
+        foregroundColor: Color(0xFFE6EDF3),
+        elevation: 0,
+      ),
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: Color(0xFF1E2530),
+        selectedItemColor: Color(0xFF67C3F3),
+        unselectedItemColor: Color(0xFF9BAEC8),
+      ),
+      textTheme: const TextTheme(
+        bodyLarge: TextStyle(color: Color(0xFFE6EDF3)),
+        bodyMedium: TextStyle(color: Color(0xFF9BAEC8)),
+        titleLarge:
+            TextStyle(color: Color(0xFFE6EDF3), fontWeight: FontWeight.bold),
+      ),
+      iconTheme: const IconThemeData(color: Color(0xFF67C3F3)),
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: Color(0xFF1E88E5),
+        foregroundColor: Colors.white,
+      ),
+      useMaterial3: true,
+    );
+
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color.fromARGB(255, 25, 3, 103),
+        scaffoldBackgroundColor: const Color(0xFFF8F9FB),
+        cardColor: Colors.white,
+        primaryColor: const Color(0xFF1976D2),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF8F9FB),
+          foregroundColor: Colors.black,
+          elevation: 0,
+        ),
+        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+          backgroundColor: Color(0xFFF3F1F8),
+          selectedItemColor: Color(0xFF1976D2),
+          unselectedItemColor: Colors.black54,
+        ),
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(color: Colors.black87),
+          bodyMedium: TextStyle(color: Colors.black54),
+          titleLarge:
+              TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+        iconTheme: const IconThemeData(color: Color(0xFF1976D2)),
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
+          backgroundColor: Color(0xFF1976D2),
+          foregroundColor: Colors.white,
         ),
         useMaterial3: true,
       ),
+      darkTheme: darkTheme,
+      themeMode: ThemeMode.system,
       home: const MyHomePage(title: 'Novaceltecc'),
     );
   }
@@ -42,85 +94,111 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget _buildScreen(int index) {
     switch (index) {
       case 0:
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _InfoCard(
-                icon: Icons.assignment,
-                iconColor: Colors.blue[200]!,
-                title: 'Pedidos pendientes',
-                mainContent: const Text(
-                  '3',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
-                ),
-                subtitle: 'total: 5',
-                onTap: () {
-                  setState(() => _selectedIndex = 1);
-                },
-              ),
-              const SizedBox(height: 16),
-              _InfoCard(
-                icon: Icons.inventory,
-                iconColor: Colors.blue[400]!,
-                title: 'Resumen del stock',
-                mainContent: const Text(
-                  '12',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
-                ),
-                subtitle: 'productos\nValor total: US\$ 840',
-                onTap: () {
-                  setState(() => _selectedIndex = 2);
-                },
-              ),
-              const SizedBox(height: 16),
-              _InfoCard(
-                icon: Icons.attach_money,
-                iconColor: Colors.blue,
-                title: 'Cotización USDT/ARG',
-                mainContent: const PrecioBTCWidget(label: 'USDT/ARG'),
-                subtitle: '',
-                onTap: () {},
-              ),
-              const SizedBox(height: 16),
-              Container(
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            return Container(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'Resumen del capital',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                    SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: IntrinsicHeight(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Kevin', style: TextStyle(fontSize: 18)),
-                        Text('500 USDT', style: TextStyle(fontSize: 18)),
+                        _InfoCard(
+                          icon: Icons.assignment,
+                          iconColor:
+                              Theme.of(context).iconTheme.color ?? Colors.blue,
+                          title: 'Pedidos pendientes',
+                          mainContent: Text(
+                            '3',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          subtitle: 'total: 5',
+                          onTap: () {
+                            setState(() => _selectedIndex = 1);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        _InfoCard(
+                          icon: Icons.inventory,
+                          iconColor:
+                              Theme.of(context).iconTheme.color ?? Colors.blue,
+                          title: 'Resumen del stock',
+                          mainContent: Text(
+                            '12',
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
+                          subtitle: 'productos\nValor total: US\$ 840',
+                          onTap: () {
+                            setState(() => _selectedIndex = 2);
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                        _InfoCard(
+                          icon: Icons.attach_money,
+                          iconColor:
+                              Theme.of(context).iconTheme.color ?? Colors.blue,
+                          title: 'Cotización USDT/ARG',
+                          mainContent: PrecioBTCWidget(label: 'USDT/ARG'),
+                          subtitle: '',
+                          onTap: () {},
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).cardColor,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Resumen del capital',
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Kevin',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge),
+                                  Text('500 USDT',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text('Nildo',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge),
+                                  Text('275 USDT',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyLarge),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
-                    SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text('Nildo', style: TextStyle(fontSize: 18)),
-                        Text('275 USDT', style: TextStyle(fontSize: 18)),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
-            ],
-          ),
+            );
+          },
         );
       case 1:
         return const PedidosScreen();
@@ -148,27 +226,20 @@ class _MyHomePageState extends State<MyHomePage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FB),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Theme.of(context).appBarTheme.backgroundColor ??
+            Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
+          children: [
             Text(
               'Sistema de Gestión',
-              style: TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.bold,
-                fontSize: 28,
-              ),
+              style: Theme.of(context).textTheme.titleLarge,
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
               'Pedidos, stock y capital',
-              style: TextStyle(
-                color: Colors.grey,
-                fontSize: 18,
-                fontWeight: FontWeight.w400,
-              ),
+              style: Theme.of(context).textTheme.bodyMedium,
             ),
           ],
         ),
@@ -239,7 +310,7 @@ class _InfoCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(
@@ -247,10 +318,11 @@ class _InfoCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.2),
+                color: Theme.of(context).iconTheme.color?.withOpacity(0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(icon, color: iconColor, size: 32),
+              child: Icon(icon,
+                  color: Theme.of(context).iconTheme.color, size: 32),
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -259,10 +331,7 @@ class _InfoCard extends StatelessWidget {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -272,10 +341,7 @@ class _InfoCard extends StatelessWidget {
                       Expanded(
                         child: Text(
                           subtitle,
-                          style: const TextStyle(
-                            color: Colors.grey,
-                            fontSize: 16,
-                          ),
+                          style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),
                     ],
@@ -283,7 +349,7 @@ class _InfoCard extends StatelessWidget {
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
+            Icon(Icons.chevron_right, color: Theme.of(context).iconTheme.color),
           ],
         ),
       ),

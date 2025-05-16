@@ -73,13 +73,11 @@ class _PedidosScreenState extends State<PedidosScreen> {
 
   List<Pedido> get pedidosFiltrados {
     return pedidos.where((p) {
-        final estadoOk =
-            filtroEstado == 'todos' || p.estado.name == filtroEstado;
-        final clienteOk =
-            filtroCliente.isEmpty ||
-            p.clienteNombre.toLowerCase().contains(filtroCliente.toLowerCase());
-        return estadoOk && clienteOk;
-      }).toList()
+      final estadoOk = filtroEstado == 'todos' || p.estado.name == filtroEstado;
+      final clienteOk = filtroCliente.isEmpty ||
+          p.clienteNombre.toLowerCase().contains(filtroCliente.toLowerCase());
+      return estadoOk && clienteOk;
+    }).toList()
       ..sort((a, b) => b.fecha.compareTo(a.fecha));
   }
 
@@ -96,25 +94,24 @@ class _PedidosScreenState extends State<PedidosScreen> {
   void _eliminarPedido(Pedido pedido) {
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Eliminar pedido'),
-            content: const Text('¿Seguro que deseas eliminar este pedido?'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancelar'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() => pedidos.remove(pedido));
-                  Navigator.pop(context);
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                child: const Text('Eliminar'),
-              ),
-            ],
+      builder: (context) => AlertDialog(
+        title: const Text('Eliminar pedido'),
+        content: const Text('¿Seguro que deseas eliminar este pedido?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
           ),
+          ElevatedButton(
+            onPressed: () {
+              setState(() => pedidos.remove(pedido));
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -130,51 +127,25 @@ class _PedidosScreenState extends State<PedidosScreen> {
   void _verDetalle(Pedido pedido) {
     showDialog(
       context: context,
-      builder:
-          (context) => _PedidoDetalleDialog(
-            pedido: pedido,
-            onEstadoChange:
-                (nuevoEstado) => _actualizarEstado(pedido, nuevoEstado),
-            onEliminar: () => _eliminarPedido(pedido),
-          ),
+      builder: (context) => _PedidoDetalleDialog(
+        pedido: pedido,
+        onEstadoChange: (nuevoEstado) => _actualizarEstado(pedido, nuevoEstado),
+        onEliminar: () => _eliminarPedido(pedido),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FB),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text(
-          'Gestión de Pedidos',
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
+        title: Text(
+          'Pedidos',
+          style: Theme.of(context).textTheme.titleLarge,
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16, top: 8),
-            child: ElevatedButton.icon(
-              onPressed: _nuevoPedido,
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text(
-                '+ Nuevo Pedido',
-                style: TextStyle(color: Colors.white),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                textStyle: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -185,9 +156,10 @@ class _PedidosScreenState extends State<PedidosScreen> {
               children: [
                 Expanded(
                   child: TextField(
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'Buscar por cliente',
-                      prefixIcon: Icon(Icons.search),
+                      prefixIcon: Icon(Icons.search,
+                          color: Theme.of(context).iconTheme.color),
                     ),
                     onChanged: (v) => setState(() => filtroCliente = v),
                   ),
@@ -195,15 +167,15 @@ class _PedidosScreenState extends State<PedidosScreen> {
                 const SizedBox(width: 12),
                 DropdownButton<String>(
                   value: filtroEstado,
-                  items:
-                      estados
-                          .map(
-                            (e) => DropdownMenuItem(
-                              value: e,
-                              child: Text(e[0].toUpperCase() + e.substring(1)),
-                            ),
-                          )
-                          .toList(),
+                  items: estados
+                      .map(
+                        (e) => DropdownMenuItem(
+                          value: e,
+                          child: Text(e[0].toUpperCase() + e.substring(1),
+                              style: Theme.of(context).textTheme.bodyLarge),
+                        ),
+                      )
+                      .toList(),
                   onChanged: (v) => setState(() => filtroEstado = v!),
                 ),
               ],
@@ -211,60 +183,61 @@ class _PedidosScreenState extends State<PedidosScreen> {
             const SizedBox(height: 16),
             Expanded(
               child: ListView(
-                children:
-                    pedidosFiltrados.map((pedido) {
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: ListTile(
-                          title: Text(
-                            pedido.clienteNombre,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                children: pedidosFiltrados.map((pedido) {
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    color: Theme.of(context).cardColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: ListTile(
+                      title: Text(
+                        pedido.clienteNombre,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Fecha: ${pedido.fecha.day}/${pedido.fecha.month}/${pedido.fecha.year}',
+                            style: Theme.of(context).textTheme.bodyMedium,
                           ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          Row(
                             children: [
+                              _EstadoChip(estado: pedido.estado),
+                              const SizedBox(width: 8),
                               Text(
-                                'Fecha: ${pedido.fecha.day}/${pedido.fecha.month}/${pedido.fecha.year}',
-                              ),
-                              Row(
-                                children: [
-                                  _EstadoChip(estado: pedido.estado),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Seña: USD ${pedido.montoSenado.toStringAsFixed(2)}',
-                                  ),
-                                ],
+                                'Seña: USD ${pedido.montoSenado.toStringAsFixed(2)}',
+                                style: Theme.of(context).textTheme.bodyMedium,
                               ),
                             ],
                           ),
-                          trailing: PopupMenuButton<String>(
-                            onSelected: (value) {
-                              if (value == 'ver') {
-                                _verDetalle(pedido);
-                              } else if (value == 'eliminar') {
-                                _eliminarPedido(pedido);
-                              }
-                            },
-                            itemBuilder:
-                                (context) => [
-                                  const PopupMenuItem(
-                                    value: 'ver',
-                                    child: Text('Ver/Editar'),
-                                  ),
-                                  if (pedido.estado == PedidoEstado.pendiente)
-                                    const PopupMenuItem(
-                                      value: 'eliminar',
-                                      child: Text('Eliminar'),
-                                    ),
-                                ],
+                        ],
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'ver') {
+                            _verDetalle(pedido);
+                          } else if (value == 'eliminar') {
+                            _eliminarPedido(pedido);
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          const PopupMenuItem(
+                            value: 'ver',
+                            child: Text('Ver/Editar'),
                           ),
-                          onTap: () => _verDetalle(pedido),
-                        ),
-                      );
-                    }).toList(),
+                          if (pedido.estado == PedidoEstado.pendiente)
+                            const PopupMenuItem(
+                              value: 'eliminar',
+                              child: Text('Eliminar'),
+                            ),
+                        ],
+                      ),
+                      onTap: () => _verDetalle(pedido),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
           ],
@@ -284,13 +257,19 @@ class _EstadoChip extends StatelessWidget {
     Color color;
     switch (estado) {
       case PedidoEstado.pendiente:
-        color = Colors.amber;
+        color = Theme.of(context).brightness == Brightness.dark
+            ? Color(0xFFFBC02D)
+            : Colors.amber;
         break;
       case PedidoEstado.pagado:
-        color = Colors.green;
+        color = Theme.of(context).brightness == Brightness.dark
+            ? Color(0xFF2E7D32)
+            : Colors.green;
         break;
       case PedidoEstado.entregado:
-        color = Colors.blue;
+        color = Theme.of(context).brightness == Brightness.dark
+            ? Color(0xFF2196F3)
+            : Colors.blue;
         break;
     }
     return Chip(
@@ -371,19 +350,17 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
             ),
             const SizedBox(height: 8),
             Column(
-              children:
-                  productos
-                      .map(
-                        (p) => ListTile(
-                          title: Text('${p.nombre} x${p.cantidad}'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed:
-                                () => setState(() => productos.remove(p)),
-                          ),
-                        ),
-                      )
-                      .toList(),
+              children: productos
+                  .map(
+                    (p) => ListTile(
+                      title: Text('${p.nombre} x${p.cantidad}'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => setState(() => productos.remove(p)),
+                      ),
+                    ),
+                  )
+                  .toList(),
             ),
             const SizedBox(height: 8),
             CheckboxListTile(
