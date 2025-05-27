@@ -1,4 +1,4 @@
-package com.example.limpieza_app
+package com.example.gestion_pedidos
 
 import io.flutter.embedding.android.FlutterActivity
 
