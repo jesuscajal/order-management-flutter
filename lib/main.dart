@@ -1,17 +1,40 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:drift/drift.dart' hide Column;
+import 'package:drift/native.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'screens/clients_screen.dart';
 import 'screens/capital_screen.dart';
 import 'screens/stock_screen.dart';
 import 'screens/pedidos_screen.dart';
 import 'screens/precio_btc_widget.dart';
 import 'screens/deudores_screen.dart';
+import 'data/app_database.dart';
 
-void main() {
-  runApp(const MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Inicializar la base de datos
+  final dbFolder = await getApplicationDocumentsDirectory();
+  final file = LazyDatabase(() async {
+    final dbPath = p.join(dbFolder.path, 'db.sqlite');
+    final dbFile = File(dbPath);
+    return NativeDatabase(dbFile);
+  });
+
+  final database = AppDatabase(file);
+
+  runApp(MyApp(database: database));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final AppDatabase database;
+
+  const MyApp({
+    super.key,
+    required this.database,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -75,14 +98,20 @@ class MyApp extends StatelessWidget {
       ),
       darkTheme: darkTheme,
       themeMode: ThemeMode.system,
-      home: const MyHomePage(title: 'Novaceltecc'),
+      home: MyHomePage(title: 'Novaceltecc', database: database),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
+  const MyHomePage({
+    super.key,
+    required this.title,
+    required this.database,
+  });
+
   final String title;
+  final AppDatabase database;
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -207,7 +236,7 @@ class _MyHomePageState extends State<MyHomePage> {
       case 3:
         return const CapitalScreen();
       case 4:
-        return const ClientsScreen();
+        return ClientsScreen(database: widget.database);
       case 5:
         return const DeudoresScreen();
       default:
