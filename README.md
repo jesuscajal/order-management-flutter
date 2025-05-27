@@ -120,7 +120,7 @@ Este proyecto está bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) par
 
 ## 👥 Equipo
 
-- **Desarrollador Principal**: [Tu Nombre]
+- **Desarrollador Principal**: JESUS CAJAL
 - **Colaboradores**: [Lista de colaboradores]
 
 ## 📞 Soporte
@@ -129,7 +129,7 @@ Si tienes problemas o preguntas:
 
 1. Revisa los [Issues](https://github.com/jesuscajal/order-management-flutter/issues)
 2. Crea un nuevo issue si no encuentras solución
-3. Contacta al equipo de desarrollo
+3. Contacta al equipo de desarrollo . jesus.cajal.work@gmail.com
 
 ---
 
