@@ -38,8 +38,8 @@ _[Agregar capturas cuando esté funcionando]_
 1. **Clonar el repositorio**
 
    ```bash
-   git clone https://github.com/TU_USUARIO/sistema-gestion-pedidos.git
-   cd sistema-gestion-pedidos
+   git clone https://github.com/jesuscajal/order-management-flutter.git
+   cd order-management-flutter
    ```
 
 2. **Instalar dependencias**
@@ -127,7 +127,7 @@ Este proyecto está bajo la Licencia MIT - ver el archivo [LICENSE](LICENSE) par
 
 Si tienes problemas o preguntas:
 
-1. Revisa los [Issues](https://github.com/TU_USUARIO/sistema-gestion-pedidos/issues)
+1. Revisa los [Issues](https://github.com/jesuscajal/order-management-flutter/issues)
 2. Crea un nuevo issue si no encuentras solución
 3. Contacta al equipo de desarrollo
 
