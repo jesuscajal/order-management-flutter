@@ -1,14 +1,39 @@
 import 'package:flutter/material.dart';
 
+import '../data/app_database.dart';
+import '../data/capital_repository.dart';
+
+/// Movimientos de capital (RF-019, RF-021 y RF-022).
+///
+/// [database] es opcional para que `const CapitalScreen()` siga compilando.
+/// Si es null, la lista queda en memoria. Para persistir, main tiene que
+/// construir `CapitalScreen(database: database)`.
 class CapitalScreen extends StatefulWidget {
-  const CapitalScreen({super.key});
+  const CapitalScreen({super.key, this.database});
+
+  final AppDatabase? database;
 
   @override
   State<CapitalScreen> createState() => _CapitalScreenState();
 }
 
+class _FilaMovimiento {
+  const _FilaMovimiento({
+    required this.fecha,
+    required this.descripcion,
+    required this.montoTexto,
+    required this.montoColor,
+    required this.tipo,
+  });
+
+  final String fecha;
+  final String descripcion;
+  final String montoTexto;
+  final Color montoColor;
+  final String tipo;
+}
+
 class _CapitalScreenState extends State<CapitalScreen> {
-  // Datos simulados
   final List<String> users = ['Kevin', 'Nildo'];
   final List<String> tipos = [
     'Inversión',
@@ -18,128 +43,286 @@ class _CapitalScreenState extends State<CapitalScreen> {
     'Salida',
   ];
 
-  List<Map<String, dynamic>> movimientos = [
-    {
-      'fecha': '24 abr. 2024',
-      'descripcion': 'Transferencia a Kevin',
-      'monto': -100,
-      'tipo': 'Salida',
-      'persona': 'Kevin',
-    },
-    {
-      'fecha': '23 abr. 2024',
-      'descripcion': 'Transferencia a Nildo',
-      'monto': -50,
-      'tipo': 'Salida',
-      'persona': 'Nildo',
-    },
-    {
-      'fecha': '22 abr. 2024',
-      'descripcion': 'Aporte de capital',
-      'monto': 200,
-      'tipo': 'Entrada',
-      'persona': 'Kevin',
-    },
-    {
-      'fecha': '21 abr. 2024',
-      'descripcion': 'Pago de TMA S.R.L.',
-      'monto': 300,
-      'tipo': 'Entrada',
-      'persona': 'Nildo',
-    },
-  ];
+  List<Map<String, dynamic>> _movimientosMemoria = [];
+  List<MovimientoCapitalRegistro> _movimientosDb = [];
+  bool _cargando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.database == null) {
+      _movimientosMemoria = _ejemplos();
+    } else {
+      _cargando = true;
+      _cargar();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant CapitalScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.database != widget.database && widget.database != null) {
+      _cargar(mostrarCarga: true);
+    }
+  }
+
+  List<Map<String, dynamic>> _ejemplos() {
+    return [
+      const {
+        'fecha': '24 abr. 2024',
+        'descripcion': 'Transferencia a Kevin',
+        'monto': -100,
+        'tipo': 'Salida',
+        'persona': 'Kevin',
+      },
+      const {
+        'fecha': '23 abr. 2024',
+        'descripcion': 'Transferencia a Nildo',
+        'monto': -50,
+        'tipo': 'Salida',
+        'persona': 'Nildo',
+      },
+      const {
+        'fecha': '22 abr. 2024',
+        'descripcion': 'Aporte de capital',
+        'monto': 200,
+        'tipo': 'Entrada',
+        'persona': 'Kevin',
+      },
+      const {
+        'fecha': '21 abr. 2024',
+        'descripcion': 'Pago de TMA S.R.L.',
+        'monto': 300,
+        'tipo': 'Entrada',
+        'persona': 'Nildo',
+      },
+    ];
+  }
+
+  Future<void> _cargar({bool mostrarCarga = false}) async {
+    final db = widget.database;
+    if (db == null) return;
+    if (mostrarCarga) {
+      setState(() => _cargando = true);
+    }
+    try {
+      final filas = await CapitalRepository(db).listar();
+      if (!mounted) return;
+      setState(() {
+        _movimientosDb = filas;
+        _cargando = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _cargando = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudieron leer los movimientos de capital.'),
+        ),
+      );
+    }
+  }
 
   void _addMovimiento(Map<String, dynamic> mov) {
     setState(() {
-      movimientos.insert(0, mov);
+      _movimientosMemoria.insert(0, mov);
     });
   }
 
-  Map<String, int> getCapitalPorPersona() {
-    final Map<String, int> capital = {for (var u in users) u: 0};
-    for (var mov in movimientos) {
-      if (capital.containsKey(mov['persona'])) {
-        capital[mov['persona']] =
-            capital[mov['persona']]! + (mov['monto'] as int);
-      }
+  Future<void> _registrarEnBase({
+    required String persona,
+    required double monto,
+    required String tipo,
+    required String descripcion,
+  }) async {
+    final db = widget.database;
+    if (db == null) return;
+    try {
+      await CapitalRepository(db).registrar(
+        persona: persona,
+        monto: monto,
+        tipo: tipo,
+        descripcion: descripcion,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo guardar el movimiento.'),
+        ),
+      );
+      return;
     }
-    return capital;
+    if (!mounted) return;
+    await _cargar();
+  }
+
+  List<ResumenFinancieroPersona> get _resumen {
+    if (widget.database == null) {
+      return CapitalRepository.resumir([
+        for (final mov in _movimientosMemoria)
+          MovimientoParaResumen(
+            persona: mov['persona'] as String,
+            monto: (mov['monto'] as num).toDouble(),
+            tipo: mov['tipo'] as String,
+          ),
+      ]);
+    }
+    return CapitalRepository.resumir([
+      for (final mov in _movimientosDb)
+        MovimientoParaResumen(
+          persona: mov.persona,
+          monto: mov.monto,
+          tipo: mov.tipo,
+        ),
+    ]);
   }
 
   void _showAddMovimientoDialog() {
-    String? persona = users.first;
-    String? tipo = tipos.first;
-    String descripcion = '';
-    int? monto;
-    showDialog(
+    final enBase = widget.database != null;
+    var personaSeleccionada = users.first;
+    var tipo = enBase ? TiposCapital.entrada : tipos.first;
+    var mostrarError = false;
+    final personaController = TextEditingController();
+    final descripcionController = TextEditingController();
+    final montoController = TextEditingController();
+
+    showDialog<void>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Nuevo movimiento'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                DropdownButtonFormField<String>(
-                  value: persona,
-                  items: users
-                      .map(
-                        (u) => DropdownMenuItem(value: u, child: Text(u)),
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setLocal) {
+            final opciones = enBase ? TiposCapital.persistidos : tipos;
+            return AlertDialog(
+              title: const Text('Nuevo movimiento'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (enBase)
+                      TextField(
+                        controller: personaController,
+                        decoration: const InputDecoration(labelText: 'Persona'),
                       )
-                      .toList(),
-                  onChanged: (v) => persona = v,
-                  decoration: const InputDecoration(labelText: 'Persona'),
+                    else
+                      DropdownButtonFormField<String>(
+                        initialValue: personaSeleccionada,
+                        isExpanded: true,
+                        items: users
+                            .map(
+                              (u) => DropdownMenuItem(value: u, child: Text(u)),
+                            )
+                            .toList(),
+                        onChanged: (valor) {
+                          if (valor == null) return;
+                          setLocal(() => personaSeleccionada = valor);
+                        },
+                        decoration: const InputDecoration(labelText: 'Persona'),
+                      ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: tipo,
+                      isExpanded: true,
+                      items: opciones
+                          .map(
+                            (opcion) => DropdownMenuItem(
+                              value: opcion,
+                              child: Text(
+                                enBase ? TiposCapital.etiqueta(opcion) : opcion,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (valor) {
+                        if (valor == null) return;
+                        setLocal(() => tipo = valor);
+                      },
+                      decoration: const InputDecoration(labelText: 'Tipo'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: descripcionController,
+                      decoration:
+                          const InputDecoration(labelText: 'Descripción'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: montoController,
+                      decoration:
+                          const InputDecoration(labelText: 'Monto (USDT)'),
+                      keyboardType: enBase
+                          ? const TextInputType.numberWithOptions(
+                              decimal: true,
+                            )
+                          : TextInputType.number,
+                    ),
+                    if (enBase && mostrarError)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Ingresa la persona y un monto mayor a cero.',
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: Colors.red,
+                                  ),
+                        ),
+                      ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: tipo,
-                  items: tipos
-                      .map(
-                        (t) => DropdownMenuItem(value: t, child: Text(t)),
-                      )
-                      .toList(),
-                  onChanged: (v) => tipo = v,
-                  decoration: const InputDecoration(labelText: 'Tipo'),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancelar'),
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  decoration: const InputDecoration(labelText: 'Descripción'),
-                  onChanged: (v) => descripcion = v,
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  decoration: const InputDecoration(labelText: 'Monto (USDT)'),
-                  keyboardType: TextInputType.number,
-                  onChanged: (v) => monto = int.tryParse(v),
+                ElevatedButton(
+                  onPressed: () {
+                    final descripcion = descripcionController.text;
+                    if (!enBase) {
+                      final monto = int.tryParse(montoController.text);
+                      if (monto == null) return;
+                      Navigator.pop(dialogContext);
+                      _addMovimiento({
+                        'fecha': _fechaTexto(DateTime.now()),
+                        'descripcion': descripcion.isEmpty ? tipo : descripcion,
+                        'monto': monto,
+                        'tipo': tipo,
+                        'persona': personaSeleccionada,
+                      });
+                      return;
+                    }
+                    final persona = personaController.text.trim();
+                    final monto = _parseMonto(montoController.text);
+                    if (persona.isEmpty || monto == null || monto <= 0) {
+                      setLocal(() => mostrarError = true);
+                      return;
+                    }
+                    Navigator.pop(dialogContext);
+                    _registrarEnBase(
+                      persona: persona,
+                      monto: monto,
+                      tipo: tipo,
+                      descripcion: descripcion,
+                    );
+                  },
+                  child: const Text('Añadir'),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (persona != null && tipo != null && monto != null) {
-                  _addMovimiento({
-                    'fecha':
-                        '${DateTime.now().day} ${_mes(DateTime.now().month)}. ${DateTime.now().year}',
-                    'descripcion': descripcion.isEmpty ? tipo! : descripcion,
-                    'monto': monto,
-                    'tipo': tipo,
-                    'persona': persona,
-                  });
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('Añadir'),
-            ),
-          ],
+            );
+          },
         );
       },
-    );
+    ).whenComplete(() {
+      personaController.dispose();
+      descripcionController.dispose();
+      montoController.dispose();
+    });
+  }
+
+  double? _parseMonto(String raw) {
+    final limpio = raw.trim().replaceAll(',', '.');
+    if (limpio.isEmpty) return null;
+    return double.tryParse(limpio);
   }
 
   String _mes(int m) {
@@ -161,9 +344,150 @@ class _CapitalScreenState extends State<CapitalScreen> {
     return meses[m];
   }
 
+  String _fechaTexto(DateTime fecha) {
+    return '${fecha.day} ${_mes(fecha.month)} ${fecha.year}';
+  }
+
+  List<_FilaMovimiento> _filas() {
+    if (widget.database == null) {
+      return [
+        for (final mov in _movimientosMemoria) _filaMemoria(mov),
+      ];
+    }
+    return [
+      for (final mov in _movimientosDb) _filaBase(mov),
+    ];
+  }
+
+  _FilaMovimiento _filaMemoria(Map<String, dynamic> mov) {
+    final monto = mov['monto'] as int;
+    final esPositivo = monto > 0;
+    return _FilaMovimiento(
+      fecha: mov['fecha'] as String,
+      descripcion: mov['descripcion'] as String,
+      montoTexto: esPositivo ? '+$monto USDT' : '$monto USDT',
+      montoColor: esPositivo ? Colors.green : Colors.red,
+      tipo: mov['tipo'] as String,
+    );
+  }
+
+  _FilaMovimiento _filaBase(MovimientoCapitalRegistro mov) {
+    final tipo = TiposCapital.normalizar(mov.tipo);
+    final texto = '${CapitalRepository.textoMonto(mov.monto.abs())} USDT';
+    final String montoTexto;
+    switch (tipo) {
+      case TiposCapital.entrada:
+      case TiposCapital.devolucion:
+        montoTexto = '+$texto';
+      case TiposCapital.salida:
+        montoTexto = '-$texto';
+      default:
+        montoTexto = texto;
+    }
+    final descripcion = mov.descripcion?.trim();
+    return _FilaMovimiento(
+      fecha: _fechaTexto(mov.fecha),
+      descripcion: (descripcion == null || descripcion.isEmpty)
+          ? mov.persona
+          : '$descripcion · ${mov.persona}',
+      montoTexto: montoTexto,
+      montoColor: _colorMonto(tipo),
+      tipo: TiposCapital.etiqueta(mov.tipo),
+    );
+  }
+
+  Color _colorMonto(String tipo) {
+    switch (tipo) {
+      case TiposCapital.salida:
+      case TiposCapital.capitalACobrar:
+        return Colors.red;
+      case TiposCapital.entrada:
+      case TiposCapital.devolucion:
+        return Colors.green;
+      default:
+        return Theme.of(context).textTheme.bodyLarge?.color ?? Colors.black;
+    }
+  }
+
+  Widget _lineaResumen(String etiqueta, double valor, {Color? color}) {
+    final estilo = Theme.of(context).textTheme.bodyLarge;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(etiqueta, style: estilo),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              '${CapitalRepository.textoMonto(valor)} USDT',
+              textAlign: TextAlign.end,
+              style: color == null ? estilo : estilo?.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bloquePersona(ResumenFinancieroPersona resumen) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          resumen.persona,
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+        _lineaResumen('Entradas', resumen.totalEntradas),
+        _lineaResumen('Salidas', resumen.totalSalidas),
+        _lineaResumen(
+          'Saldo de deuda',
+          resumen.saldoDeuda,
+          color: resumen.saldoDeuda > 0 ? Colors.red : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _filaTabla(_FilaMovimiento fila) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(fila.fecha, overflow: TextOverflow.ellipsis),
+          ),
+          Expanded(
+            flex: 3,
+            child: Text(fila.descripcion, overflow: TextOverflow.ellipsis),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              fila.montoTexto,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: fila.montoColor,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Text(fila.tipo, overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final capital = getCapitalPorPersona();
+    final resumen = _resumen;
+    final filas = _filas();
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
@@ -174,150 +498,132 @@ class _CapitalScreenState extends State<CapitalScreen> {
           style: Theme.of(context).textTheme.titleLarge,
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      body: _cargando
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.all(16),
               children: [
-                Text(
-                  'Resumen del capital',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Kevin', style: Theme.of(context).textTheme.bodyLarge),
-                    Text('${capital['Kevin'] ?? 0} USDT',
-                        style: Theme.of(context).textTheme.bodyLarge),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Nildo', style: Theme.of(context).textTheme.bodyLarge),
-                    Text('${capital['Nildo'] ?? 0} USDT',
-                        style: Theme.of(context).textTheme.bodyLarge),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).cardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.shade200),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Movimientos recientes',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: const [
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        'Fecha',
-                        style: TextStyle(fontWeight: FontWeight.bold),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Resumen financiero',
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
-                    ),
-                    Expanded(
-                      flex: 3,
-                      child: Text(
-                        'Descripción',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        'Monto',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        'Tipo',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
+                      const SizedBox(height: 12),
+                      if (resumen.isEmpty)
+                        Text(
+                          'Sin movimientos',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        )
+                      else
+                        for (var i = 0; i < resumen.length; i++) ...[
+                          if (i > 0) const Divider(),
+                          _bloquePersona(resumen[i]),
+                        ],
+                    ],
+                  ),
                 ),
-                const Divider(),
-                SizedBox(
-                  height: 180,
-                  child: ListView.builder(
-                    itemCount: movimientos.length,
-                    itemBuilder: (context, index) {
-                      final m = movimientos[index];
-                      final monto = m['monto'] as int;
-                      final isEntrada = monto > 0;
-                      Color color = isEntrada ? Colors.green : Colors.red;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 6),
-                        child: Row(
-                          children: [
-                            Expanded(flex: 2, child: Text(m['fecha'])),
-                            Expanded(flex: 3, child: Text(m['descripcion'])),
-                            Expanded(
-                              flex: 2,
-                              child: Text(
-                                (isEntrada ? '+' : '') + '$monto USDT',
-                                style: TextStyle(
-                                  color: color,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            Expanded(flex: 2, child: Text(m['tipo'])),
-                          ],
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Movimientos recientes',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
                         ),
-                      );
-                    },
+                      ),
+                      const SizedBox(height: 12),
+                      const Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              'Fecha',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 3,
+                            child: Text(
+                              'Descripción',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              'Monto',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          Expanded(
+                            flex: 2,
+                            child: Text(
+                              'Tipo',
+                              style: TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(),
+                      if (filas.isEmpty)
+                        Text(
+                          'Sin movimientos',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        )
+                      else
+                        SizedBox(
+                          height: 180,
+                          child: ListView.builder(
+                            itemCount: filas.length,
+                            itemBuilder: (context, index) {
+                              return _filaTabla(filas[index]);
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton(
+                    onPressed: _showAddMovimientoDialog,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                    ),
+                    child: const Text(
+                      '+ Nuevo movimiento',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: ElevatedButton(
-              onPressed: _showAddMovimientoDialog,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 12,
-                ),
-              ),
-              child: const Text(
-                '+ Nuevo movimiento',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
