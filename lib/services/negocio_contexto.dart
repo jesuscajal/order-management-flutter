@@ -1,37 +1,91 @@
 import '../data/app_database.dart';
 
-/// Arma un resumen de texto con lo que hay en SQLite para el asistente.
-/// Pedidos y stock que solo viven en memoria de otras pantallas no entran acá.
+/// Producto con el stock leído de las tablas, sin crear usuarios.
+class ProductoConStock {
+  const ProductoConStock({
+    required this.nombre,
+    required this.precioCompra,
+    required this.precioVenta,
+    required this.stockYo,
+    required this.stockNildo,
+    required this.stockOtros,
+  });
+
+  final String nombre;
+  final double precioCompra;
+  final double precioVenta;
+  final int stockYo;
+  final int stockNildo;
+  final int stockOtros;
+
+  int get stockTotal => stockYo + stockNildo + stockOtros;
+}
+
+/// Resume clientes, productos y stock para el asistente del prototipo.
+/// No incluye capital, deudas ni datos que el prototipo no consulta.
 class NegocioContexto {
   final AppDatabase database;
 
   NegocioContexto(this.database);
 
-  Future<String> resumir() async {
-    final buffer = StringBuffer();
-
-    final clientes = await database.select(database.clientes).get();
+  Future<List<ProductoConStock>> listarProductosConStock() async {
     final productos = await database.select(database.productos).get();
     final stock = await database.select(database.stock).get();
     final usuarios = await database.select(database.usuarios).get();
-    final pedidos = await database.select(database.pedidos).get();
-    final lineas = await database.select(database.productosPedido).get();
-    final movimientos = await database.select(database.movimientosCapital).get();
+    int? idYo;
+    int? idNildo;
+    for (final usuario in usuarios) {
+      final nombre = usuario.nombre.trim().toLowerCase();
+      if (nombre == 'yo' && (idYo == null || usuario.id < idYo)) {
+        idYo = usuario.id;
+      } else if (nombre == 'nildo' && (idNildo == null || usuario.id < idNildo)) {
+        idNildo = usuario.id;
+      }
+    }
+    final acumulado = <int, _StockAcum>{};
 
-    final nombreProducto = {for (final p in productos) p.id: p.nombre};
-    final nombreCliente = {for (final c in clientes) c.id: c.nombre};
-    final nombreUsuario = {for (final u in usuarios) u.id: u.nombre};
+    for (final fila in stock) {
+      final item = acumulado.putIfAbsent(fila.productoId, () => _StockAcum());
+      if (idYo != null && fila.usuarioId == idYo) {
+        item.yo += fila.cantidadActual;
+      } else if (idNildo != null && fila.usuarioId == idNildo) {
+        item.nildo += fila.cantidadActual;
+      } else {
+        item.otros += fila.cantidadActual;
+      }
+    }
+
+    final lista = [
+      for (final producto in productos)
+        ProductoConStock(
+          nombre: producto.nombre,
+          precioCompra: producto.precioCompra,
+          precioVenta: producto.precioVenta,
+          stockYo: acumulado[producto.id]?.yo ?? 0,
+          stockNildo: acumulado[producto.id]?.nildo ?? 0,
+          stockOtros: acumulado[producto.id]?.otros ?? 0,
+        ),
+    ];
+    lista.sort(
+      (a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()),
+    );
+    return lista;
+  }
+
+  Future<String> resumir() async {
+    final buffer = StringBuffer();
+    final clientes = await database.select(database.clientes).get();
+    final productos = await listarProductosConStock();
+    clientes.sort(
+      (a, b) => a.nombre.toLowerCase().compareTo(b.nombre.toLowerCase()),
+    );
 
     buffer.writeln('Clientes (${clientes.length}):');
     if (clientes.isEmpty) {
       buffer.writeln('- sin registros');
     } else {
-      for (final c in clientes.take(40)) {
-        buffer.writeln(
-          '- ${c.nombre} | pago: ${c.estadoPago} | '
-          'contacto: ${c.contacto ?? '-'} | email: ${c.email ?? '-'} | '
-          'potencial: ${c.esPotencial ? 'sí' : 'no'}',
-        );
+      for (final cliente in clientes.take(80)) {
+        buffer.writeln('- ${cliente.nombre}');
       }
     }
 
@@ -39,50 +93,11 @@ class NegocioContexto {
     if (productos.isEmpty) {
       buffer.writeln('- sin registros');
     } else {
-      for (final p in productos.take(40)) {
+      for (final producto in productos.take(80)) {
         buffer.writeln(
-          '- ${p.nombre} | compra: ${p.precioCompra} | venta: ${p.precioVenta}',
-        );
-      }
-    }
-
-    buffer.writeln('Stock (${stock.length}):');
-    if (stock.isEmpty) {
-      buffer.writeln('- sin registros');
-    } else {
-      for (final s in stock.take(40)) {
-        final producto = nombreProducto[s.productoId] ?? 'producto ${s.productoId}';
-        final usuario = nombreUsuario[s.usuarioId] ?? 'usuario ${s.usuarioId}';
-        buffer.writeln('- $producto | $usuario | cantidad: ${s.cantidadActual}');
-      }
-    }
-
-    buffer.writeln('Pedidos (${pedidos.length}):');
-    if (pedidos.isEmpty) {
-      buffer.writeln('- sin registros');
-    } else {
-      for (final pedido in pedidos.take(40)) {
-        final cliente = nombreCliente[pedido.clienteId] ?? 'cliente ${pedido.clienteId}';
-        final items = lineas.where((l) => l.pedidoId == pedido.id).map((l) {
-          final nombre = nombreProducto[l.productoId] ?? 'producto ${l.productoId}';
-          return '$nombre x${l.cantidad}';
-        }).join(', ');
-        final fecha = pedido.fecha.toIso8601String().split('T').first;
-        buffer.writeln(
-          '- #$pedido.id | $cliente | $fecha | estado: ${pedido.estado} | '
-          'seña: ${pedido.montoSenado} | items: ${items.isEmpty ? '-' : items}',
-        );
-      }
-    }
-
-    buffer.writeln('Movimientos de capital (${movimientos.length}):');
-    if (movimientos.isEmpty) {
-      buffer.writeln('- sin registros');
-    } else {
-      for (final m in movimientos.take(40)) {
-        final fecha = m.fecha.toIso8601String().split('T').first;
-        buffer.writeln(
-          '- $fecha | ${m.persona} | ${m.tipo} | ${m.monto} | ${m.descripcion ?? ''}',
+          '- ${producto.nombre} | compra: ${producto.precioCompra} | '
+          'venta: ${producto.precioVenta} | stock Yo: ${producto.stockYo} | '
+          'Nildo: ${producto.stockNildo} | otros: ${producto.stockOtros}',
         );
       }
     }
@@ -91,4 +106,10 @@ class NegocioContexto {
     if (texto.length <= 8000) return texto;
     return texto.substring(0, 8000);
   }
+}
+
+class _StockAcum {
+  int yo = 0;
+  int nildo = 0;
+  int otros = 0;
 }

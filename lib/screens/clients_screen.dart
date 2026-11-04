@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:drift/drift.dart' hide Column;
-import 'package:flutter_contacts/flutter_contacts.dart';
+import '../utils/contactos.dart';
 import '../models/cliente.dart' as models;
 import '../data/app_database.dart';
+import '../data/capital_repository.dart';
+import '../data/pedido_repository.dart';
 import '../data/daos/cliente_dao.dart';
+import '../models/pedido_estado.dart';
+import '../theme/app_theme.dart';
 
 enum FiltroClientes { todos, activos, potenciales }
 
@@ -26,6 +30,9 @@ class _ClientsScreenState extends State<ClientsScreen> {
   late ClienteDao _clienteDao;
   List<models.Cliente> _clientes = [];
   bool _isLoading = true;
+  Map<String, double>? _saldosPorNombre;
+  Map<String, String> _comprasPorNombre = {};
+  bool _saldoNoDisponible = false;
 
   @override
   void initState() {
@@ -38,19 +45,33 @@ class _ClientsScreenState extends State<ClientsScreen> {
     setState(() => _isLoading = true);
     try {
       final clientes = await _clienteDao.getAllClientes();
+      final mapeados = clientes
+          .map((c) => models.Cliente.fromData({
+                'id': c.id,
+                'nombre': c.nombre,
+                'contacto': c.contacto,
+                'email': c.email,
+                'esPotencial': c.esPotencial,
+                'notas': c.notas,
+                'estadoPago': c.estadoPago,
+                'fechaCreacion': c.fechaCreacion.toIso8601String(),
+              }))
+          .toList();
+      Map<String, double> saldos = {};
+      var compras = <String, String>{};
+      var saldoFallo = false;
+      try {
+        saldos = await _leerSaldos();
+        compras = await _leerCompras();
+      } catch (_) {
+        saldoFallo = true;
+      }
+      if (!mounted) return;
       setState(() {
-        _clientes = clientes
-            .map((c) => models.Cliente.fromData({
-                  'id': c.id,
-                  'nombre': c.nombre,
-                  'contacto': c.contacto,
-                  'email': c.email,
-                  'esPotencial': c.esPotencial,
-                  'notas': c.notas,
-                  'estadoPago': c.estadoPago,
-                  'fechaCreacion': c.fechaCreacion.toIso8601String(),
-                }))
-            .toList();
+        _clientes = mapeados;
+        _saldosPorNombre = saldos;
+        _comprasPorNombre = compras;
+        _saldoNoDisponible = saldoFallo;
         _isLoading = false;
       });
     } catch (e) {
@@ -61,6 +82,64 @@ class _ClientsScreenState extends State<ClientsScreen> {
         );
       }
     }
+  }
+
+  Future<Map<String, double>> _leerSaldos() async {
+    final filas = await CapitalRepository(widget.database).listar();
+    final resumen = CapitalRepository.resumir([
+      for (final fila in filas)
+        MovimientoParaResumen(
+          persona: fila.persona,
+          monto: fila.monto,
+          tipo: fila.tipo,
+        ),
+    ]);
+    return {
+      for (final fila in resumen)
+        fila.persona.trim().toLowerCase(): fila.saldoDeuda,
+    };
+  }
+
+  Widget _bloqueSaldo(String nombre) {
+    final String texto;
+    final Color color;
+    if (_saldoNoDisponible) {
+      texto = 'Saldo a cobrar: no se pudo calcular';
+      color = AppColors.textoSuave;
+    } else {
+      final saldo = _saldosPorNombre?[nombre.trim().toLowerCase()] ?? 0;
+      texto = 'Saldo a cobrar: ${CapitalRepository.textoMonto(saldo)} USDT';
+      color = saldo > 0 ? AppColors.alerta : AppColors.verde;
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Text(
+        texto,
+        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+      ),
+    );
+  }
+
+  Future<Map<String, String>> _leerCompras() async {
+    final pedidos = await PedidoRepository(widget.database).listarPedidos();
+    final grupos = <String, List<String>>{};
+    for (final pedido in pedidos) {
+      if (PedidoEstados.leer(pedido.estado) == PedidoEstado.cancelado) continue;
+      final clave = pedido.clienteNombre.trim().toLowerCase();
+      if (clave.isEmpty) continue;
+      grupos.putIfAbsent(clave, () => []).add(
+        [
+          for (final item in pedido.items) '${item.nombre} x${item.cantidad}',
+        ].join(', '),
+      );
+    }
+    return {
+      for (final entrada in grupos.entries)
+        entrada.key: entrada.value.take(3).join(' · '),
+    };
   }
 
   List<models.Cliente> get _clientesFiltrados {
@@ -255,7 +334,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
 
     if (result == true) {
       try {
-        final clienteId = await _clienteDao.insertCliente(
+        await _clienteDao.insertCliente(
           ClientesCompanion.insert(
             nombre: controllerNombre.text,
             contacto: Value(controllerContacto.text),
@@ -278,6 +357,82 @@ class _ClientsScreenState extends State<ClientsScreen> {
             SnackBar(content: Text('Error al crear cliente: $e')),
           );
         }
+      }
+    }
+  }
+
+  Future<void> _mostrarDialogoEditar(models.Cliente cliente) async {
+    final nombreCtrl = TextEditingController(text: cliente.nombre);
+    final contactoCtrl = TextEditingController(text: cliente.contacto);
+    final emailCtrl = TextEditingController(text: cliente.email ?? '');
+    final notasCtrl = TextEditingController(text: cliente.notas ?? '');
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Editar cliente'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nombreCtrl,
+                decoration: const InputDecoration(labelText: 'Nombre'),
+              ),
+              TextField(
+                controller: contactoCtrl,
+                decoration: const InputDecoration(labelText: 'Contacto'),
+              ),
+              TextField(
+                controller: emailCtrl,
+                decoration: const InputDecoration(labelText: 'Email'),
+              ),
+              TextField(
+                controller: notasCtrl,
+                decoration: const InputDecoration(labelText: 'Notas'),
+                maxLines: 2,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+    final nombre = nombreCtrl.text.trim();
+    final contacto = contactoCtrl.text.trim();
+    final email = emailCtrl.text.trim();
+    final notas = notasCtrl.text.trim();
+    nombreCtrl.dispose();
+    contactoCtrl.dispose();
+    emailCtrl.dispose();
+    notasCtrl.dispose();
+    if (result != true || nombre.isEmpty || contacto.isEmpty) return;
+    try {
+      await _clienteDao.updateCliente(
+        ClientesCompanion(
+          id: Value(cliente.id),
+          nombre: Value(nombre),
+          contacto: Value(contacto),
+          email: Value(email.isEmpty ? null : email),
+          esPotencial: Value(cliente.esPotencial),
+          notas: Value(notas.isEmpty ? null : notas),
+          estadoPago: Value(cliente.estadoPago.toString().split('.').last),
+        ),
+      );
+      await _cargarClientes();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al editar cliente: $e')),
+        );
       }
     }
   }
@@ -378,6 +533,21 @@ class _ClientsScreenState extends State<ClientsScreen> {
 
     if (result == true) {
       try {
+        final pedidos = await (widget.database.select(widget.database.pedidos)
+              ..where((p) => p.clienteId.equals(cliente.id)))
+            .get();
+        if (pedidos.isNotEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'No se puede eliminar: este cliente tiene pedidos.',
+                ),
+              ),
+            );
+          }
+          return;
+        }
         await _clienteDao.deleteCliente(cliente.id);
         await _cargarClientes();
       } catch (e) {
@@ -411,7 +581,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                   value: filtro,
                   child: Text(
                     filtro.toString().split('.').last,
-                    style: const TextStyle(color: Colors.black),
+                    style: const TextStyle(color: AppColors.texto),
                   ),
                 );
               }).toList(),
@@ -455,7 +625,8 @@ class _ClientsScreenState extends State<ClientsScreen> {
                   itemCount: _clientesFiltrados.length,
                   itemBuilder: (context, index) {
                     final cliente = _clientesFiltrados[index];
-                    final isPhone =
+                    final tieneContacto = cliente.contacto.isNotEmpty;
+                    final isPhone = tieneContacto &&
                         RegExp(r'^\+?[\d\s-]{8,}$').hasMatch(cliente.contacto);
 
                     return Card(
@@ -511,7 +682,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                         ],
                                       ),
                                       const SizedBox(height: 12),
-                                      if (isPhone)
+                                      if (tieneContacto && isPhone)
                                         GestureDetector(
                                           onTap: () async {
                                             final phone = cliente.contacto
@@ -533,7 +704,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                                 padding:
                                                     const EdgeInsets.all(8),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFF67C3F3)
+                                                  color: AppColors.teal
                                                       .withOpacity(0.12),
                                                   borderRadius:
                                                       BorderRadius.circular(12),
@@ -543,8 +714,8 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                                   color: Theme.of(context)
                                                               .brightness ==
                                                           Brightness.dark
-                                                      ? Color(0xFF67C3F3)
-                                                      : Color(0xFF25D366),
+                                                      ? AppColors.lima
+                                                      : AppColors.verde,
                                                   size: 22,
                                                 ),
                                               ),
@@ -558,7 +729,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                             ],
                                           ),
                                         ),
-                                      if (!isPhone)
+                                      if (tieneContacto && !isPhone)
                                         Row(
                                           children: [
                                             Container(
@@ -692,12 +863,28 @@ class _ClientsScreenState extends State<ClientsScreen> {
                                 ),
                               ),
                             ],
+                            _bloqueSaldo(cliente.nombre),
+                            if ((_comprasPorNombre[cliente.nombre.trim().toLowerCase()] ?? '')
+                                .isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Compras: ${_comprasPorNombre[cliente.nombre.trim().toLowerCase()]}',
+                                  style: const TextStyle(color: AppColors.textoSuave),
+                                ),
+                              ),
                             const SizedBox(height: 12),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Row(
                                   children: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          _mostrarDialogoEditar(cliente),
+                                      child: const Text('Editar'),
+                                    ),
+                                    const SizedBox(width: 4),
                                     ElevatedButton.icon(
                                       onPressed: () =>
                                           _mostrarDialogoActualizarEstado(
@@ -1072,8 +1259,7 @@ class _ContactSearchDialogState extends State<_ContactSearchDialog> {
                       if (email.isNotEmpty)
                         Row(
                           children: [
-                            Icon(Icons.email,
-                                size: 12, color: Colors.blue[600]),
+                            Icon(Icons.email, size: 12, color: AppColors.azul),
                             const SizedBox(width: 4),
                             Expanded(
                               child: Text(

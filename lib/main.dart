@@ -1,31 +1,68 @@
-import 'dart:io';
+import 'dart:async';
+
+import 'package:device_preview/device_preview.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:drift/drift.dart' hide Column;
-import 'package:drift/native.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+import 'data/database_connection.dart';
 import 'screens/clients_screen.dart';
 import 'screens/capital_screen.dart';
 import 'screens/stock_screen.dart';
 import 'screens/pedidos_screen.dart';
 import 'screens/precio_btc_widget.dart';
 import 'screens/deudores_screen.dart';
+import 'screens/chat_ia_screen.dart';
+import 'screens/tienda_screen.dart';
+import 'screens/resumen_ventas_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/negocio_inicial_screen.dart';
+import 'screens/configuracion_web_screen.dart';
+import 'screens/equipo_screen.dart';
+import 'screens/actividad_screen.dart';
+import 'screens/categorias_screen.dart';
+import 'screens/cierre_caja_screen.dart';
+import 'screens/compra_screen.dart';
+import 'screens/tienda_publica_screen.dart';
+import 'services/negocio_local.dart';
+import 'services/subdominio_tienda.dart';
+import 'backend/catalogo_remoto.dart';
+import 'backend/negocio_remoto.dart';
+import 'backend/remoto_comun.dart';
+import 'backend/sesion_remota.dart';
+import 'backend/sincronizar_negocio.dart';
+import 'backend/supabase_cliente.dart';
 import 'data/app_database.dart';
+import 'services/sesion_google.dart';
+import 'data/capital_repository.dart';
+import 'data/datos_demo.dart';
+import 'theme/app_theme.dart';
+import 'widgets/fondo_gexi.dart';
+import 'widgets/logo_gexi.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SupabaseListo.iniciar();
+  final database = AppDatabase(openDatabaseConnection());
+  NegocioStore.alPublicar = (negocio) => const NegocioRemoto().publicar(negocio);
+  NegocioStore.alGuardarCatalogo = CatalogoRemoto.publicarCategorias;
+  CatalogoRemoto.leerProducto = (id) async {
+    final filas = await database.select(database.productos).get();
+    for (final fila in filas) {
+      if (fila.id != id) continue;
+      return (
+        nombre: fila.nombre,
+        compra: fila.precioCompra,
+        venta: fila.precioVenta,
+      );
+    }
+    return null;
+  };
 
-  // Inicializar la base de datos
-  final dbFolder = await getApplicationDocumentsDirectory();
-  final file = LazyDatabase(() async {
-    final dbPath = p.join(dbFolder.path, 'db.sqlite');
-    final dbFile = File(dbPath);
-    return NativeDatabase(dbFile);
-  });
-
-  final database = AppDatabase(file);
-
-  runApp(MyApp(database: database));
+  runApp(
+    DevicePreview(
+      enabled: !kReleaseMode,
+      builder: (context) => MyApp(database: database),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -38,80 +75,202 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData darkTheme = ThemeData.dark().copyWith(
-      scaffoldBackgroundColor: const Color(0xFF0D1117),
-      cardColor: const Color(0xFF161B22),
-      primaryColor: const Color(0xFF1E88E5),
-      dividerColor: const Color(0xFF2C3A4A),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF0D1117),
-        foregroundColor: Color(0xFFE6EDF3),
-        elevation: 0,
-      ),
-      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Color(0xFF1E2530),
-        selectedItemColor: Color(0xFF67C3F3),
-        unselectedItemColor: Color(0xFF9BAEC8),
-      ),
-      textTheme: const TextTheme(
-        bodyLarge: TextStyle(color: Color(0xFFE6EDF3)),
-        bodyMedium: TextStyle(color: Color(0xFF9BAEC8)),
-        titleLarge:
-            TextStyle(color: Color(0xFFE6EDF3), fontWeight: FontWeight.bold),
-      ),
-      iconTheme: const IconThemeData(color: Color(0xFF67C3F3)),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: Color(0xFF1E88E5),
-        foregroundColor: Colors.white,
-      ),
-      useMaterial3: true,
-    );
-
+    final slugPublico = SubdominioTienda.slugDesdeHost(Uri.base.host);
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        scaffoldBackgroundColor: const Color(0xFFF8F9FB),
-        cardColor: Colors.white,
-        primaryColor: const Color(0xFF1976D2),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF8F9FB),
-          foregroundColor: Colors.black,
-          elevation: 0,
-        ),
-        bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-          backgroundColor: Color(0xFFF3F1F8),
-          selectedItemColor: Color(0xFF1976D2),
-          unselectedItemColor: Colors.black54,
-        ),
-        textTheme: const TextTheme(
-          bodyLarge: TextStyle(color: Colors.black87),
-          bodyMedium: TextStyle(color: Colors.black54),
-          titleLarge:
-              TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ),
-        iconTheme: const IconThemeData(color: Color(0xFF1976D2)),
-        floatingActionButtonTheme: const FloatingActionButtonThemeData(
-          backgroundColor: Color(0xFF1976D2),
-          foregroundColor: Colors.white,
-        ),
-        useMaterial3: true,
-      ),
-      darkTheme: darkTheme,
-      themeMode: ThemeMode.system,
-      home: MyHomePage(title: 'Novaceltecc', database: database),
+      title: 'Gexi',
+      locale: DevicePreview.locale(context),
+      builder: DevicePreview.appBuilder,
+      theme: buildLightTheme(),
+      darkTheme: buildDarkTheme(),
+      themeMode: ThemeMode.light,
+      home: slugPublico == null
+          ? _PuertaAcceso(database: database)
+          : TiendaPublicaScreen(slug: slugPublico),
     );
   }
+}
+
+class _PuertaAcceso extends StatefulWidget {
+  const _PuertaAcceso({required this.database});
+
+  final AppDatabase database;
+
+  @override
+  State<_PuertaAcceso> createState() => _PuertaAccesoState();
+}
+
+class _PuertaAccesoState extends State<_PuertaAcceso> {
+  SesionGoogle? _sesion;
+  NegocioLocal? _negocio;
+  bool _lista = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _recuperar();
+  }
+
+  Future<void> _recuperar() async {
+    final sesion = await AuthGoogle.instancia.leer();
+    final negocio = await NegocioStore().leer();
+    if (!mounted) return;
+    setState(() {
+      _sesion = sesion;
+      _negocio = negocio;
+      _lista = true;
+    });
+  }
+
+  Future<void> _entrarConCorreo(String correo) async {
+    final sesion = await AuthGoogle.instancia.entrarConCorreo(correo);
+    final negocio = await NegocioStore().leer();
+    if (!mounted) return;
+    setState(() {
+      _sesion = sesion;
+      _negocio = negocio;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_lista) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    final sesion = _sesion;
+    if (sesion == null) {
+      return LoginScreen(
+        alEntrar: (nueva) => setState(() => _sesion = nueva),
+        alContinuar: _entrarConCorreo,
+      );
+    }
+    final negocio = _negocio;
+    final miembro = negocio?.miembroConEmail(sesion.email);
+    if (negocio != null &&
+        !_mismoDueno(negocio.duenoEmail, sesion.email) &&
+        miembro != null &&
+        !miembro.activo) {
+      return _AccesoInactivo(
+        alSalir: () async {
+          await AuthGoogle.instancia.salir();
+          await const SesionRemota().salir();
+          if (!mounted) return;
+          setState(() => _sesion = null);
+        },
+      );
+    }
+    final entraComoEmpleado = negocio != null &&
+        negocio.configurado &&
+        miembro != null &&
+        miembro.activo;
+    if (negocio == null ||
+        (!_mismoDueno(negocio.duenoEmail, sesion.email) && !entraComoEmpleado)) {
+      return CrearNegocioScreen(
+        duenoEmail: sesion.email,
+        alCrear: (creado) => setState(() => _negocio = creado),
+        alUnirse: (unido) => setState(() => _negocio = unido),
+      );
+    }
+    if (!negocio.configurado) {
+      return ConfiguracionAsistidaScreen(
+        negocio: negocio,
+        duenoEmail: sesion.email,
+        alConfirmar: (confirmado) => setState(() => _negocio = confirmado),
+      );
+    }
+    return MyHomePage(
+      database: widget.database,
+      sesion: sesion,
+      negocio: negocio,
+      alCerrarSesion: () async {
+        await AuthGoogle.instancia.salir();
+        await const SesionRemota().salir();
+        if (!mounted) return;
+        setState(() => _sesion = null);
+      },
+    );
+  }
+}
+
+class _AccesoInactivo extends StatelessWidget {
+  const _AccesoInactivo({required this.alSalir});
+
+  final Future<void> Function() alSalir;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.fondoClaro,
+      body: FondoGexi(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Spacer(),
+                Text(
+                  'Tu acceso está inactivo',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Un administrador tiene que activarte de nuevo para entrar con tu código de empleado.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.textoSuave, height: 1.35),
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: alSalir,
+                  child: const Text('Cerrar sesión'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+bool _administra(NegocioLocal negocio, String email) {
+  if (_mismoDueno(negocio.duenoEmail, email)) return true;
+  final miembro = negocio.miembroConEmail(email);
+  return miembro != null && miembro.activo && miembro.rol == 'administrador';
+}
+
+String _textoCodigo(NegocioLocal negocio, String email) {
+  if (_mismoDueno(negocio.duenoEmail, email)) {
+    return 'Código del negocio ${negocio.codigo}';
+  }
+  final miembro = negocio.miembroConEmail(email);
+  if (miembro == null) return 'Código del negocio ${negocio.codigo}';
+  return '${miembro.etiquetaRol} · ${miembro.codigo}';
+}
+
+bool _mismoDueno(String duenoEmail, String emailSesion) {
+  final dueno = duenoEmail.trim().toLowerCase();
+  if (dueno.isEmpty) return false;
+  return dueno == emailSesion.trim().toLowerCase();
 }
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({
     super.key,
-    required this.title,
     required this.database,
+    required this.sesion,
+    required this.negocio,
+    required this.alCerrarSesion,
   });
 
-  final String title;
   final AppDatabase database;
+  final SesionGoogle sesion;
+  final NegocioLocal negocio;
+  final Future<void> Function() alCerrarSesion;
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
@@ -120,125 +279,69 @@ class MyHomePage extends StatefulWidget {
 class _MyHomePageState extends State<MyHomePage> {
   int _selectedIndex = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_prepararDatos());
+  }
+
+  Future<void> _prepararDatos() async {
+    try {
+      await sembrarDatosDemoNovaceltec(widget.database);
+    } catch (error) {
+      debugPrint('Gexi: no se pudo preparar la muestra: $error');
+    }
+    await RemotoComun.enSerie(
+      () => SincronizarNegocio.traer(widget.database),
+    );
+  }
+
   Widget _buildScreen(int index) {
     switch (index) {
       case 0:
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            return Container(
-              color: Theme.of(context).scaffoldBackgroundColor,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                  child: IntrinsicHeight(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _InfoCard(
-                          icon: Icons.assignment,
-                          iconColor:
-                              Theme.of(context).iconTheme.color ?? Colors.blue,
-                          title: 'Pedidos pendientes',
-                          mainContent: Text(
-                            '3',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          subtitle: 'total: 5',
-                          onTap: () {
-                            setState(() => _selectedIndex = 1);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        _InfoCard(
-                          icon: Icons.inventory,
-                          iconColor:
-                              Theme.of(context).iconTheme.color ?? Colors.blue,
-                          title: 'Resumen del stock',
-                          mainContent: Text(
-                            '12',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          subtitle: 'productos\nValor total: US\$ 840',
-                          onTap: () {
-                            setState(() => _selectedIndex = 2);
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        _InfoCard(
-                          icon: Icons.attach_money,
-                          iconColor:
-                              Theme.of(context).iconTheme.color ?? Colors.blue,
-                          title: 'Cotización USDT/ARG',
-                          mainContent: PrecioBTCWidget(label: 'USDT/ARG'),
-                          subtitle: '',
-                          onTap: () {},
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).cardColor,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Resumen del capital',
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('Kevin',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge),
-                                  Text('500 USDT',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('Nildo',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge),
-                                  Text('275 USDT',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodyLarge),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
+        return _Inicio(
+          sesion: widget.sesion,
+          negocio: widget.negocio,
+          database: widget.database,
+          alAbrirPedidos: () => setState(() => _selectedIndex = 1),
+          alAbrirStock: () => setState(() => _selectedIndex = 2),
+          alAbrirClientes: () => _abrir(ClientsScreen(database: widget.database)),
+          alAbrirAsistente: _abrirAsistente,
+          alAbrirCapital: () => _abrir(CapitalScreen(database: widget.database)),
+          alAbrirTienda: () => _abrir(TiendaScreen(database: widget.database)),
+          alAbrirVentas: () => _abrir(ResumenVentasScreen(database: widget.database)),
+          alAbrirPagina: () => _abrir(
+            ConfiguracionWebScreen(database: widget.database),
+          ),
+          alAbrirCategorias: () => _abrir(const CategoriasScreen()),
+          alAbrirCompra: () => _abrir(CompraScreen(database: widget.database)),
+          alAbrirCierre: () => _abrir(CierreCajaScreen(database: widget.database)),
         );
       case 1:
-        return const PedidosScreen();
+        return PedidosScreen(database: widget.database);
       case 2:
-        return const StockScreen();
+        return StockScreen(database: widget.database);
       case 3:
-        return const CapitalScreen();
-      case 4:
-        return ClientsScreen(database: widget.database);
-      case 5:
-        return const DeudoresScreen();
+        return _Mas(
+          sesion: widget.sesion,
+          negocio: widget.negocio,
+          alAbrirClientes: () => _abrir(ClientsScreen(database: widget.database)),
+          alAbrirCapital: () => _abrir(CapitalScreen(database: widget.database)),
+          alAbrirDeudores: () => _abrir(DeudoresScreen(database: widget.database)),
+          alAbrirAsistente: _abrirAsistente,
+          alAbrirTienda: () => _abrir(TiendaScreen(database: widget.database)),
+          alAbrirVentas: () => _abrir(ResumenVentasScreen(database: widget.database)),
+          alAbrirPagina: () => _abrir(
+            ConfiguracionWebScreen(database: widget.database),
+          ),
+          alAbrirEquipo: () => _abrir(const EquipoScreen()),
+          alAbrirActividad: () =>
+              _abrir(ActividadScreen(database: widget.database)),
+          alAbrirCategorias: () => _abrir(const CategoriasScreen()),
+          alAbrirCompra: () => _abrir(CompraScreen(database: widget.database)),
+          alAbrirCierre: () => _abrir(CierreCajaScreen(database: widget.database)),
+          alCerrarSesion: widget.alCerrarSesion,
+        );
       default:
         return const Center(child: Text('Pantalla no encontrada'));
     }
@@ -250,31 +353,23 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
+  void _abrir(Widget pantalla) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => pantalla),
+    );
+  }
+
+  void _abrirAsistente() {
+    _abrir(ChatIaScreen(database: widget.database));
+  }
+
   @override
   Widget build(BuildContext context) {
+    final conFondo = _selectedIndex == 0 || _selectedIndex == 3;
+    final contenido = _buildScreen(_selectedIndex);
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FB),
-      appBar: AppBar(
-        backgroundColor: Theme.of(context).appBarTheme.backgroundColor ??
-            Theme.of(context).scaffoldBackgroundColor,
-        elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Sistema de Gestión',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Pedidos, stock y capital',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-        toolbarHeight: 80,
-      ),
-      body: _buildScreen(_selectedIndex),
+      backgroundColor: AppColors.fondoClaro,
+      body: conFondo ? FondoGexi(child: SafeArea(child: contenido)) : contenido,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: _onItemTapped,
@@ -285,29 +380,19 @@ class _MyHomePageState extends State<MyHomePage> {
             label: 'Inicio',
           ),
           NavigationDestination(
-            icon: Icon(Icons.assignment_outlined),
-            selectedIcon: Icon(Icons.assignment),
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
             label: 'Pedidos',
           ),
           NavigationDestination(
             icon: Icon(Icons.inventory_2_outlined),
-            selectedIcon: Icon(Icons.inventory),
+            selectedIcon: Icon(Icons.inventory_2),
             label: 'Stock',
           ),
           NavigationDestination(
-            icon: Icon(Icons.attach_money_outlined),
-            selectedIcon: Icon(Icons.attach_money),
-            label: 'Capital',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.people_outline),
-            selectedIcon: Icon(Icons.people),
-            label: 'Clientes',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.account_balance_wallet_outlined),
-            selectedIcon: Icon(Icons.account_balance_wallet),
-            label: 'Deudores',
+            icon: Icon(Icons.grid_view_outlined),
+            selectedIcon: Icon(Icons.grid_view),
+            label: 'Más',
           ),
         ],
       ),
@@ -315,73 +400,482 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-class _InfoCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final Widget mainContent;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _InfoCard({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.mainContent,
-    required this.subtitle,
+class _ResumenCapitalCard extends StatelessWidget {
+  const _ResumenCapitalCard({
+    required this.database,
     required this.onTap,
   });
 
+  final AppDatabase database;
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).iconTheme.color?.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(12),
+    return FutureBuilder<List<ResumenFinancieroPersona>>(
+      future: CapitalRepository(database).listar().then(
+            (movimientos) => CapitalRepository.resumir(
+              movimientos.map(
+                (m) => MovimientoParaResumen(
+                  persona: m.persona,
+                  monto: m.monto,
+                  tipo: m.tipo,
+                ),
               ),
-              child: Icon(icon,
-                  color: Theme.of(context).iconTheme.color, size: 32),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+          ),
+      builder: (context, snapshot) {
+        final personas = snapshot.data ?? const <ResumenFinancieroPersona>[];
+        return GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: AppColors.tarjeta,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Resumen del capital',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                if (snapshot.connectionState == ConnectionState.waiting &&
+                    personas.isEmpty)
                   Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      mainContent,
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          subtitle,
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
+                    'Cargando...',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  )
+                else if (personas.isEmpty)
+                  Text(
+                    'Todavía no hay movimientos.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  )
+                else
+                  for (final persona in personas.take(4))
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            persona.persona,
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          Text(
+                            CapitalRepository.textoMonto(
+                              persona.totalEntradas - persona.totalSalidas,
+                            ),
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ],
-              ),
+                    ),
+              ],
             ),
-            Icon(Icons.chevron_right, color: Theme.of(context).iconTheme.color),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _Inicio extends StatelessWidget {
+  const _Inicio({
+    required this.sesion,
+    required this.negocio,
+    required this.database,
+    required this.alAbrirPedidos,
+    required this.alAbrirStock,
+    required this.alAbrirClientes,
+    required this.alAbrirAsistente,
+    required this.alAbrirCapital,
+    required this.alAbrirTienda,
+    required this.alAbrirVentas,
+    required this.alAbrirPagina,
+    required this.alAbrirCategorias,
+    required this.alAbrirCompra,
+    required this.alAbrirCierre,
+  });
+
+  final SesionGoogle sesion;
+  final NegocioLocal negocio;
+  final AppDatabase database;
+  final VoidCallback alAbrirPedidos;
+  final VoidCallback alAbrirStock;
+  final VoidCallback alAbrirClientes;
+  final VoidCallback alAbrirAsistente;
+  final VoidCallback alAbrirCapital;
+  final VoidCallback alAbrirTienda;
+  final VoidCallback alAbrirVentas;
+  final VoidCallback alAbrirPagina;
+  final VoidCallback alAbrirCategorias;
+  final VoidCallback alAbrirCompra;
+  final VoidCallback alAbrirCierre;
+
+  @override
+  Widget build(BuildContext context) {
+    final tema = Theme.of(context);
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+      children: [
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: LogoGexi(ancho: 112),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Hola, ${sesion.saludo}',
+          style: tema.textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          negocio.nombre,
+          style: tema.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 18),
+        GridView.count(
+          crossAxisCount: 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 12,
+          crossAxisSpacing: 12,
+          childAspectRatio: 1.45,
+          children: [
+            _Acceso(
+              icono: Icons.receipt_long_rounded,
+              titulo: 'Pedidos',
+              detalle: 'Estados y señas',
+              color: const Color(0xFF2563EB),
+              fondo: const Color(0xFFE8F0FF),
+              onTap: alAbrirPedidos,
+            ),
+            _Acceso(
+              icono: Icons.inventory_2_rounded,
+              titulo: 'Stock',
+              detalle: 'Productos y cantidades',
+              color: const Color(0xFFD97706),
+              fondo: const Color(0xFFFFF4E5),
+              onTap: alAbrirStock,
+            ),
+            _Acceso(
+              icono: Icons.people_alt_rounded,
+              titulo: 'Clientes',
+              detalle: 'Contactos y pagos',
+              color: const Color(0xFF14B8A6),
+              fondo: const Color(0xFFE7FBF6),
+              onTap: alAbrirClientes,
+            ),
+            _Acceso(
+              icono: Icons.auto_awesome_rounded,
+              titulo: 'Asistente',
+              detalle: 'Preguntas del negocio',
+              color: AppColors.verde,
+              fondo: const Color(0xFFE8F9EE),
+              onTap: alAbrirAsistente,
+            ),
+            _Acceso(
+              icono: Icons.storefront_rounded,
+              titulo: 'Tienda',
+              detalle: 'Catálogo y WhatsApp',
+              color: const Color(0xFF14B8A6),
+              fondo: const Color(0xFFE7FBF6),
+              onTap: alAbrirTienda,
+            ),
+            _Acceso(
+              icono: Icons.insights_rounded,
+              titulo: 'Ventas',
+              detalle: 'Hoy, semana y mes',
+              color: AppColors.primario,
+              fondo: const Color(0xFFE8F0FF),
+              onTap: alAbrirVentas,
+            ),
+            if (_administra(negocio, sesion.email))
+              _Acceso(
+                icono: Icons.shopping_bag_rounded,
+                titulo: 'Compra',
+                detalle: 'Proveedor y stock',
+                color: AppColors.primario,
+                fondo: const Color(0xFFE8F0FF),
+                onTap: alAbrirCompra,
+              ),
+            if (_administra(negocio, sesion.email))
+              _Acceso(
+                icono: Icons.point_of_sale_rounded,
+                titulo: 'Cierre de caja',
+                detalle: 'Efectivo del día',
+                color: AppColors.primario,
+                fondo: const Color(0xFFE8F0FF),
+                onTap: alAbrirCierre,
+              ),
+            if (_administra(negocio, sesion.email))
+              _Acceso(
+                icono: Icons.category_rounded,
+                titulo: 'Categorías',
+                detalle: 'Orden del catálogo',
+                color: AppColors.primario,
+                fondo: const Color(0xFFE8F0FF),
+                onTap: alAbrirCategorias,
+              ),
+            if (_administra(negocio, sesion.email))
+              _Acceso(
+                icono: Icons.language_rounded,
+                titulo: 'Tu página web',
+                detalle: 'Publicación y dirección',
+                color: AppColors.primario,
+                fondo: AppColors.limaBrillo,
+                onTap: alAbrirPagina,
+              ),
           ],
         ),
+        const SizedBox(height: 16),
+        const PrecioBTCWidget(label: 'USDT/ARG'),
+        if (_administra(negocio, sesion.email)) ...[
+          const SizedBox(height: 16),
+          _ResumenCapitalCard(
+            database: database,
+            onTap: alAbrirCapital,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _Acceso extends StatelessWidget {
+  const _Acceso({
+    required this.icono,
+    required this.titulo,
+    required this.detalle,
+    required this.color,
+    required this.fondo,
+    required this.onTap,
+  });
+
+  final IconData icono;
+  final String titulo;
+  final String detalle;
+  final Color color;
+  final Color fondo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: AppColors.tarjeta,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: fondo,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icono, color: color, size: 20),
+                ),
+                const Spacer(),
+                Text(
+                  titulo,
+                  style: const TextStyle(
+                    color: AppColors.texto,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detalle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.textoSuave, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
+    );
+  }
+}
+
+class _Mas extends StatelessWidget {
+  const _Mas({
+    required this.sesion,
+    required this.negocio,
+    required this.alAbrirClientes,
+    required this.alAbrirCapital,
+    required this.alAbrirDeudores,
+    required this.alAbrirAsistente,
+    required this.alAbrirTienda,
+    required this.alAbrirVentas,
+    required this.alAbrirPagina,
+    required this.alAbrirEquipo,
+    required this.alAbrirActividad,
+    required this.alAbrirCategorias,
+    required this.alAbrirCompra,
+    required this.alAbrirCierre,
+    required this.alCerrarSesion,
+  });
+
+  final SesionGoogle sesion;
+  final NegocioLocal negocio;
+  final VoidCallback alAbrirClientes;
+  final VoidCallback alAbrirCapital;
+  final VoidCallback alAbrirDeudores;
+  final VoidCallback alAbrirAsistente;
+  final VoidCallback alAbrirTienda;
+  final VoidCallback alAbrirVentas;
+  final VoidCallback alAbrirPagina;
+  final VoidCallback alAbrirEquipo;
+  final VoidCallback alAbrirActividad;
+  final VoidCallback alAbrirCategorias;
+  final VoidCallback alAbrirCompra;
+  final VoidCallback alAbrirCierre;
+  final Future<void> Function() alCerrarSesion;
+
+  @override
+  Widget build(BuildContext context) {
+    final foto = sesion.fotoUrl;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+      children: [
+        Text('Más', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: AppColors.tarjeta,
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: AppColors.limaBrillo,
+                foregroundImage: foto == null ? null : NetworkImage(foto),
+                child: Text(
+                  sesion.saludo.isEmpty ? 'G' : sesion.saludo[0].toUpperCase(),
+                  style: const TextStyle(
+                    color: AppColors.primario,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      sesion.nombre,
+                      style: const TextStyle(
+                        color: AppColors.texto,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(sesion.email, style: const TextStyle(color: AppColors.textoSuave)),
+                    Text(
+                      _textoCodigo(negocio, sesion.email),
+                      style: const TextStyle(
+                        color: AppColors.lima,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          decoration: AppColors.tarjeta,
+          child: Column(
+            children: [
+              _Opcion(icono: Icons.people_alt_rounded, titulo: 'Clientes', color: const Color(0xFF14B8A6), fondo: const Color(0xFFE7FBF6), onTap: alAbrirClientes),
+              const Divider(height: 1, indent: 68),
+              _Opcion(icono: Icons.insights_rounded, titulo: 'Ventas', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirVentas),
+              if (_administra(negocio, sesion.email)) ...[
+                const Divider(height: 1, indent: 68),
+                _Opcion(icono: Icons.category_rounded, titulo: 'Categorías', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCategorias),
+                const Divider(height: 1, indent: 68),
+                _Opcion(icono: Icons.payments_rounded, titulo: 'Capital', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCapital),
+                const Divider(height: 1, indent: 68),
+                _Opcion(icono: Icons.shopping_bag_rounded, titulo: 'Compra', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCompra),
+                const Divider(height: 1, indent: 68),
+                _Opcion(icono: Icons.point_of_sale_rounded, titulo: 'Cierre de caja', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCierre),
+              ],
+              const Divider(height: 1, indent: 68),
+              _Opcion(icono: Icons.account_balance_wallet_rounded, titulo: 'Deudores', color: const Color(0xFFD97706), fondo: const Color(0xFFFFF4E5), onTap: alAbrirDeudores),
+              const Divider(height: 1, indent: 68),
+              _Opcion(icono: Icons.storefront_rounded, titulo: 'Tienda', color: const Color(0xFF14B8A6), fondo: const Color(0xFFE7FBF6), onTap: alAbrirTienda),
+              if (_administra(negocio, sesion.email)) ...[
+                const Divider(height: 1, indent: 68),
+                _Opcion(icono: Icons.language_rounded, titulo: 'Tu página web', color: AppColors.primario, fondo: AppColors.limaBrillo, onTap: alAbrirPagina),
+              ],
+              const Divider(height: 1, indent: 68),
+              _Opcion(icono: Icons.auto_awesome_rounded, titulo: 'Asistente', color: AppColors.verde, fondo: const Color(0xFFE8F9EE), onTap: alAbrirAsistente),
+              if (_administra(negocio, sesion.email)) ...[
+                const Divider(height: 1, indent: 68),
+                _Opcion(icono: Icons.groups_rounded, titulo: 'Equipo', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirEquipo),
+              ],
+              const Divider(height: 1, indent: 68),
+              _Opcion(icono: Icons.history_rounded, titulo: 'Actividad', color: const Color(0xFFD97706), fondo: const Color(0xFFFFF4E5), onTap: alAbrirActividad),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextButton.icon(
+          onPressed: alCerrarSesion,
+          icon: const Icon(Icons.logout, color: AppColors.alerta),
+          label: const Text('Cerrar sesión', style: TextStyle(color: AppColors.alerta)),
+        ),
+      ],
+    );
+  }
+}
+
+class _Opcion extends StatelessWidget {
+  const _Opcion({
+    required this.icono,
+    required this.titulo,
+    required this.color,
+    required this.fondo,
+    required this.onTap,
+  });
+
+  final IconData icono;
+  final String titulo;
+  final Color color;
+  final Color fondo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      leading: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: fondo,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icono, color: color, size: 20),
+      ),
+      title: Text(
+        titulo,
+        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.texto),
+      ),
+      trailing: const Icon(Icons.chevron_right, color: AppColors.textoSuave),
+      onTap: onTap,
     );
   }
 }

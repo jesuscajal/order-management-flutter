@@ -7,6 +7,7 @@ class MovimientoCapital {
   final DateTime fecha;
   final TipoMovimiento tipo;
   final String descripcion;
+  final String tipoGuardado;
 
   MovimientoCapital({
     required this.id,
@@ -15,6 +16,7 @@ class MovimientoCapital {
     required this.fecha,
     required this.tipo,
     required this.descripcion,
+    this.tipoGuardado = '',
   });
 
   // Método para crear un ID único

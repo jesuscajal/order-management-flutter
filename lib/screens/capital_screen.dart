@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../data/capital_repository.dart';
+import '../theme/app_theme.dart';
 
 /// Movimientos de capital (RF-019, RF-021 y RF-022).
 ///
@@ -35,17 +36,11 @@ class _FilaMovimiento {
 
 class _CapitalScreenState extends State<CapitalScreen> {
   final List<String> users = ['Kevin', 'Nildo'];
-  final List<String> tipos = [
-    'Inversión',
-    'Transferencia',
-    'Capital a cobrar',
-    'Entrada',
-    'Salida',
-  ];
 
   List<Map<String, dynamic>> _movimientosMemoria = [];
   List<MovimientoCapitalRegistro> _movimientosDb = [];
   bool _cargando = false;
+  String _periodo = 'todo';
 
   @override
   void initState() {
@@ -99,27 +94,29 @@ class _CapitalScreenState extends State<CapitalScreen> {
     ];
   }
 
-  Future<void> _cargar({bool mostrarCarga = false}) async {
+  Future<bool> _cargar({bool mostrarCarga = false}) async {
     final db = widget.database;
-    if (db == null) return;
+    if (db == null) return false;
     if (mostrarCarga) {
       setState(() => _cargando = true);
     }
     try {
       final filas = await CapitalRepository(db).listar();
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() {
         _movimientosDb = filas;
         _cargando = false;
       });
+      return true;
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => _cargando = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No se pudieron leer los movimientos de capital.'),
         ),
       );
+      return false;
     }
   }
 
@@ -154,7 +151,19 @@ class _CapitalScreenState extends State<CapitalScreen> {
       return;
     }
     if (!mounted) return;
-    await _cargar();
+    final actualizo = await _cargar();
+    if (actualizo) _avisarGuardado(tipo);
+  }
+
+  void _avisarGuardado(String tipo) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Listo: ${TiposCapital.etiqueta(tipo)}. El resumen se actualizó.',
+        ),
+      ),
+    );
   }
 
   List<ResumenFinancieroPersona> get _resumen {
@@ -181,7 +190,8 @@ class _CapitalScreenState extends State<CapitalScreen> {
   void _showAddMovimientoDialog() {
     final enBase = widget.database != null;
     var personaSeleccionada = users.first;
-    var tipo = enBase ? TiposCapital.entrada : tipos.first;
+    var tipo = TiposCapital.entrada;
+    var medio = 'Efectivo';
     var mostrarError = false;
     final personaController = TextEditingController();
     final descripcionController = TextEditingController();
@@ -192,12 +202,12 @@ class _CapitalScreenState extends State<CapitalScreen> {
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setLocal) {
-            final opciones = enBase ? TiposCapital.persistidos : tipos;
             return AlertDialog(
               title: const Text('Nuevo movimiento'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (enBase)
                       TextField(
@@ -223,13 +233,11 @@ class _CapitalScreenState extends State<CapitalScreen> {
                     DropdownButtonFormField<String>(
                       initialValue: tipo,
                       isExpanded: true,
-                      items: opciones
+                      items: TiposCapital.persistidos
                           .map(
                             (opcion) => DropdownMenuItem(
                               value: opcion,
-                              child: Text(
-                                enBase ? TiposCapital.etiqueta(opcion) : opcion,
-                              ),
+                              child: Text(TiposCapital.etiqueta(opcion)),
                             ),
                           )
                           .toList(),
@@ -237,7 +245,32 @@ class _CapitalScreenState extends State<CapitalScreen> {
                         if (valor == null) return;
                         setLocal(() => tipo = valor);
                       },
-                      decoration: const InputDecoration(labelText: 'Tipo'),
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      TiposCapital.ayuda(tipo),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: medio,
+                      isExpanded: true,
+                      items: const [
+                        DropdownMenuItem(value: 'Efectivo', child: Text('Efectivo')),
+                        DropdownMenuItem(
+                          value: 'Transferencia',
+                          child: Text('Transferencia'),
+                        ),
+                        DropdownMenuItem(value: 'Otro', child: Text('Otro')),
+                      ],
+                      onChanged: (valor) {
+                        if (valor == null) return;
+                        setLocal(() => medio = valor);
+                      },
+                      decoration: const InputDecoration(labelText: 'Medio'),
                     ),
                     const SizedBox(height: 8),
                     TextField(
@@ -250,17 +283,17 @@ class _CapitalScreenState extends State<CapitalScreen> {
                       controller: montoController,
                       decoration:
                           const InputDecoration(labelText: 'Monto (USDT)'),
-                      keyboardType: enBase
-                          ? const TextInputType.numberWithOptions(
-                              decimal: true,
-                            )
-                          : TextInputType.number,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                     ),
-                    if (enBase && mostrarError)
+                    if (mostrarError)
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          'Ingresa la persona y un monto mayor a cero.',
+                          enBase
+                              ? 'Ingresá la persona y un monto mayor a cero.'
+                              : 'Ingresá un monto mayor a cero.',
                           style:
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: Colors.red,
@@ -277,22 +310,26 @@ class _CapitalScreenState extends State<CapitalScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    final descripcion = descripcionController.text;
+                    final nota = descripcionController.text.trim();
+                    final descripcion = nota.isEmpty ? medio : '$medio · $nota';
+                    final monto = _parseMonto(montoController.text);
                     if (!enBase) {
-                      final monto = int.tryParse(montoController.text);
-                      if (monto == null) return;
+                      if (monto == null || monto <= 0) {
+                        setLocal(() => mostrarError = true);
+                        return;
+                      }
                       Navigator.pop(dialogContext);
                       _addMovimiento({
                         'fecha': _fechaTexto(DateTime.now()),
-                        'descripcion': descripcion.isEmpty ? tipo : descripcion,
+                        'descripcion': descripcion,
                         'monto': monto,
                         'tipo': tipo,
                         'persona': personaSeleccionada,
                       });
+                      _avisarGuardado(tipo);
                       return;
                     }
                     final persona = personaController.text.trim();
-                    final monto = _parseMonto(montoController.text);
                     if (persona.isEmpty || monto == null || monto <= 0) {
                       setLocal(() => mostrarError = true);
                       return;
@@ -355,19 +392,47 @@ class _CapitalScreenState extends State<CapitalScreen> {
       ];
     }
     return [
-      for (final mov in _movimientosDb) _filaBase(mov),
+      for (final mov in _movimientosDb)
+        if (_entra(mov.fecha)) _filaBase(mov),
     ];
   }
 
+  bool _entra(DateTime fecha) {
+    final ahora = DateTime.now();
+    final dia = DateTime(fecha.year, fecha.month, fecha.day);
+    final hoy = DateTime(ahora.year, ahora.month, ahora.day);
+    switch (_periodo) {
+      case 'hoy':
+        return dia == hoy;
+      case 'semana':
+        return !dia.isBefore(hoy.subtract(const Duration(days: 6)));
+      case 'mes':
+        return fecha.year == ahora.year && fecha.month == ahora.month;
+      default:
+        return true;
+    }
+  }
+
   _FilaMovimiento _filaMemoria(Map<String, dynamic> mov) {
-    final monto = mov['monto'] as int;
-    final esPositivo = monto > 0;
+    final monto = (mov['monto'] as num).toDouble();
+    final tipo = TiposCapital.normalizar(mov['tipo'] as String);
+    final texto = '${CapitalRepository.textoMonto(monto.abs())} USDT';
+    final String montoTexto;
+    switch (tipo) {
+      case TiposCapital.entrada:
+      case TiposCapital.devolucion:
+        montoTexto = '+$texto';
+      case TiposCapital.salida:
+        montoTexto = '-$texto';
+      default:
+        montoTexto = texto;
+    }
     return _FilaMovimiento(
       fecha: mov['fecha'] as String,
       descripcion: mov['descripcion'] as String,
-      montoTexto: esPositivo ? '+$monto USDT' : '$monto USDT',
-      montoColor: esPositivo ? Colors.green : Colors.red,
-      tipo: mov['tipo'] as String,
+      montoTexto: montoTexto,
+      montoColor: _colorMonto(tipo),
+      tipo: TiposCapital.etiqueta(tipo),
     );
   }
 
@@ -442,11 +507,18 @@ class _CapitalScreenState extends State<CapitalScreen> {
         ),
         _lineaResumen('Entradas', resumen.totalEntradas),
         _lineaResumen('Salidas', resumen.totalSalidas),
+        _lineaResumen('Pagos / devoluciones', resumen.totalPagos),
         _lineaResumen(
-          'Saldo de deuda',
+          'Saldo a cobrar',
           resumen.saldoDeuda,
           color: resumen.saldoDeuda > 0 ? Colors.red : null,
         ),
+        if (resumen.saldoAPagar != 0)
+          _lineaResumen(
+            'Saldo a pagar',
+            resumen.saldoAPagar,
+            color: resumen.saldoAPagar > 0 ? Colors.red : null,
+          ),
       ],
     );
   }
@@ -505,10 +577,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  decoration: AppColors.tarjeta,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -533,11 +602,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardColor,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
+                  decoration: AppColors.tarjeta,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -547,6 +612,24 @@ class _CapitalScreenState extends State<CapitalScreen> {
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
                         ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          for (final opcion in const [
+                            ('todo', 'Todo'),
+                            ('hoy', 'Hoy'),
+                            ('semana', '7 días'),
+                            ('mes', 'Este mes'),
+                          ])
+                            ChoiceChip(
+                              label: Text(opcion.$2),
+                              selected: _periodo == opcion.$1,
+                              onSelected: (_) =>
+                                  setState(() => _periodo = opcion.$1),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 12),
                       const Row(
@@ -608,9 +691,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).primaryColor,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                      shape: const StadiumBorder(),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 18,
                         vertical: 12,

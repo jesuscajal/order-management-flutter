@@ -23,18 +23,21 @@ class Cliente {
 
   // Método para crear un nuevo cliente
   static Cliente fromData(Map<String, dynamic> data) {
+    final creacion = data['fechaCreacion'];
     return Cliente(
       id: data['id'] as int,
-      nombre: data['nombre'] as String,
-      contacto: data['contacto'] as String,
+      nombre: (data['nombre'] as String?)?.trim() ?? '',
+      contacto: (data['contacto'] as String?)?.trim() ?? '',
       email: data['email'] as String?,
-      esPotencial: data['esPotencial'] as bool,
+      esPotencial: data['esPotencial'] as bool? ?? false,
       notas: data['notas'] as String?,
       estadoPago: EstadoPago.values.firstWhere(
         (e) => e.toString().split('.').last == data['estadoPago'],
         orElse: () => EstadoPago.pendiente,
       ),
-      fechaCreacion: DateTime.parse(data['fechaCreacion'] as String),
+      fechaCreacion: creacion is DateTime
+          ? creacion
+          : DateTime.tryParse('$creacion') ?? DateTime.now(),
     );
   }
 

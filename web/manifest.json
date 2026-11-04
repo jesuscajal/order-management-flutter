@@ -1,11 +1,11 @@
 {
-    "name": "limpieza_app",
-    "short_name": "limpieza_app",
+    "name": "Gexi",
+    "short_name": "Gexi",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F5FBFA",
+    "theme_color": "#1A56F0",
+    "description": "Gestión inteligente para crecer",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

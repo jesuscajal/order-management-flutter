@@ -1,568 +1,261 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../data/ampliacion_local.dart';
 import '../data/app_database.dart' show AppDatabase;
+import '../data/cobro_local.dart';
 import '../data/pedido_repository.dart';
+import '../models/pedido_estado.dart';
+import '../models/producto_pedido.dart';
 import '../theme/app_theme.dart';
 
-// Modelos básicos para la demo
-enum PedidoEstado { pendiente, pagado, entregado }
-
-String pedidoEstadoToString(PedidoEstado estado) {
-  switch (estado) {
+/// pendiente y pendiente de pago comparten el ámbar; pagado usa el verde
+/// de completado, confirmado el azul de en curso, entregado el verde y
+/// cancelado el rojo de alerta. `en proceso` se lee como confirmado.
+Color colorPedidoEstado(String raw) {
+  switch (PedidoEstados.leer(raw)) {
     case PedidoEstado.pendiente:
-      return 'Pendiente';
+    case PedidoEstado.pendienteDePago:
+      return AppColors.pendiente;
     case PedidoEstado.pagado:
-      return 'Pagado';
+      return AppColors.completado;
+    case PedidoEstado.confirmado:
+      return AppColors.enCurso;
     case PedidoEstado.entregado:
-      return 'Entregado';
+      return AppColors.verde;
+    case PedidoEstado.cancelado:
+      return AppColors.alerta;
+    case null:
+      return AppColors.textoSuave;
   }
 }
 
-class ProductoPedido {
-  final String nombre;
-  final int cantidad;
-  ProductoPedido({required this.nombre, required this.cantidad});
+/// Sin [database] se mantiene la demo en memoria.
+/// Con [database] los pedidos se leen y escriben en SQLite.
+class PedidosScreen extends StatefulWidget {
+  final AppDatabase? database;
+
+  const PedidosScreen({super.key, this.database});
+
+  @override
+  State<PedidosScreen> createState() => _PedidosScreenState();
 }
 
-class Pedido {
-  final String id;
-  final String clienteNombre;
-  final DateTime fecha;
-  PedidoEstado estado;
-  double montoSenado;
-  List<ProductoPedido> productos;
-  Pedido({
+class _PedidoVista {
+  const _PedidoVista({
     required this.id,
     required this.clienteNombre,
     required this.fecha,
     required this.estado,
     required this.montoSenado,
     required this.productos,
-  });
-}
-
-/// Sin [database] se mantiene la demo en memoria.
-/// Con [database] los pedidos se leen y escriben en SQLite.
-class PedidosScreen extends StatelessWidget {
-  final AppDatabase? database;
-
-  const PedidosScreen({super.key, this.database});
-
-  @override
-  Widget build(BuildContext context) {
-    final db = database;
-    if (db == null) {
-      return const _PedidosMemoriaScreen();
-    }
-    return _PedidosDbScreen(database: db);
-  }
-}
-
-class _PedidosMemoriaScreen extends StatefulWidget {
-  const _PedidosMemoriaScreen();
-
-  @override
-  State<_PedidosMemoriaScreen> createState() => _PedidosMemoriaScreenState();
-}
-
-class _PedidosMemoriaScreenState extends State<_PedidosMemoriaScreen> {
-  List<Pedido> pedidos = [
-    Pedido(
-      id: '1',
-      clienteNombre: 'Kevin',
-      fecha: DateTime.now().subtract(const Duration(days: 1)),
-      estado: PedidoEstado.pendiente,
-      montoSenado: 50,
-      productos: [
-        ProductoPedido(nombre: 'Powerbank', cantidad: 2),
-        ProductoPedido(nombre: 'Cable USB', cantidad: 5),
-      ],
-    ),
-    Pedido(
-      id: '2',
-      clienteNombre: 'Nildo',
-      fecha: DateTime.now(),
-      estado: PedidoEstado.pagado,
-      montoSenado: 100,
-      productos: [ProductoPedido(nombre: 'Cargador rápido', cantidad: 1)],
-    ),
-  ];
-
-  String filtroEstado = 'todos';
-  String filtroCliente = '';
-  final estados = ['todos', 'pendiente', 'pagado', 'entregado'];
-
-  List<Pedido> get pedidosFiltrados {
-    return pedidos.where((p) {
-      final estadoOk = filtroEstado == 'todos' || p.estado.name == filtroEstado;
-      final clienteOk = filtroCliente.isEmpty ||
-          p.clienteNombre.toLowerCase().contains(filtroCliente.toLowerCase());
-      return estadoOk && clienteOk;
-    }).toList()
-      ..sort((a, b) => b.fecha.compareTo(a.fecha));
-  }
-
-  void _nuevoPedido() async {
-    final nuevo = await showDialog<Pedido>(
-      context: context,
-      builder: (context) => _NuevoPedidoDialog(),
-    );
-    if (nuevo != null) {
-      setState(() => pedidos.add(nuevo));
-    }
-  }
-
-  void _eliminarPedido(Pedido pedido) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Eliminar pedido'),
-        content: const Text('¿Seguro que deseas eliminar este pedido?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              setState(() => pedidos.remove(pedido));
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Eliminar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _actualizarEstado(Pedido pedido, PedidoEstado nuevoEstado) {
-    setState(() {
-      final idx = pedidos.indexWhere((p) => p.id == pedido.id);
-      if (idx != -1) {
-        pedidos[idx].estado = nuevoEstado;
-      }
-    });
-  }
-
-  void _verDetalle(Pedido pedido) {
-    showDialog(
-      context: context,
-      builder: (context) => _PedidoDetalleDialog(
-        pedido: pedido,
-        onEstadoChange: (nuevoEstado) => _actualizarEstado(pedido, nuevoEstado),
-        onEliminar: () => _eliminarPedido(pedido),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text(
-          'Pedidos',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            // Filtros
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: InputDecoration(
-                      labelText: 'Buscar por cliente',
-                      prefixIcon: Icon(Icons.search,
-                          color: Theme.of(context).iconTheme.color),
-                    ),
-                    onChanged: (v) => setState(() => filtroCliente = v),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                DropdownButton<String>(
-                  value: filtroEstado,
-                  items: estados
-                      .map(
-                        (e) => DropdownMenuItem(
-                          value: e,
-                          child: Text(e[0].toUpperCase() + e.substring(1),
-                              style: Theme.of(context).textTheme.bodyLarge),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (v) => setState(() => filtroEstado = v!),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ListView(
-                children: pedidosFiltrados.map((pedido) {
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    color: Theme.of(context).cardColor,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: ListTile(
-                      title: Text(
-                        pedido.clienteNombre,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Fecha: ${pedido.fecha.day}/${pedido.fecha.month}/${pedido.fecha.year}',
-                            style: Theme.of(context).textTheme.bodyMedium,
-                          ),
-                          Row(
-                            children: [
-                              _EstadoChip(estado: pedido.estado),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Seña: USD ${pedido.montoSenado.toStringAsFixed(2)}',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (value) {
-                          if (value == 'ver') {
-                            _verDetalle(pedido);
-                          } else if (value == 'eliminar') {
-                            _eliminarPedido(pedido);
-                          }
-                        },
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(
-                            value: 'ver',
-                            child: Text('Ver/Editar'),
-                          ),
-                          if (pedido.estado == PedidoEstado.pendiente)
-                            const PopupMenuItem(
-                              value: 'eliminar',
-                              child: Text('Eliminar'),
-                            ),
-                        ],
-                      ),
-                      onTap: () => _verDetalle(pedido),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Widget para mostrar el estado con color
-class _EstadoChip extends StatelessWidget {
-  final PedidoEstado estado;
-  const _EstadoChip({required this.estado});
-
-  @override
-  Widget build(BuildContext context) {
-    Color color;
-    switch (estado) {
-      case PedidoEstado.pendiente:
-        color = Theme.of(context).brightness == Brightness.dark
-            ? Color(0xFFFBC02D)
-            : Colors.amber;
-        break;
-      case PedidoEstado.pagado:
-        color = Theme.of(context).brightness == Brightness.dark
-            ? AppColors.lima
-            : AppColors.tealFuerte;
-        break;
-      case PedidoEstado.entregado:
-        color = Theme.of(context).brightness == Brightness.dark
-            ? AppColors.azulClaro
-            : AppColors.azul;
-        break;
-    }
-    return Chip(
-      label: Text(pedidoEstadoToString(estado)),
-      backgroundColor: color.withOpacity(0.2),
-      labelStyle: TextStyle(color: color, fontWeight: FontWeight.bold),
-    );
-  }
-}
-
-// Diálogo para crear nuevo pedido
-class _NuevoPedidoDialog extends StatefulWidget {
-  @override
-  State<_NuevoPedidoDialog> createState() => _NuevoPedidoDialogState();
-}
-
-class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
-  String cliente = '';
-  double montoSenado = 0;
-  List<ProductoPedido> productos = [];
-  String productoNombre = '';
-  int productoCantidad = 1;
-  bool pagoCompleto = false;
-
-  double get montoTotal {
-    // Simulación: cada producto vale 10 USD
-    return productos.fold<double>(0, (sum, p) => sum + p.cantidad * 10);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Nuevo Pedido'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              decoration: const InputDecoration(labelText: 'Cliente'),
-              onChanged: (v) => cliente = v,
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: const InputDecoration(labelText: 'Producto'),
-                    onChanged: (v) => productoNombre = v,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 60,
-                  child: TextField(
-                    decoration: const InputDecoration(labelText: 'Cant.'),
-                    keyboardType: TextInputType.number,
-                    onChanged: (v) => productoCantidad = int.tryParse(v) ?? 1,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add),
-                  onPressed: () {
-                    if (productoNombre.isNotEmpty && productoCantidad > 0) {
-                      setState(() {
-                        productos.add(
-                          ProductoPedido(
-                            nombre: productoNombre,
-                            cantidad: productoCantidad,
-                          ),
-                        );
-                        productoNombre = '';
-                        productoCantidad = 1;
-                      });
-                    }
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Column(
-              children: productos
-                  .map(
-                    (p) => ListTile(
-                      title: Text('${p.nombre} x${p.cantidad}'),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => setState(() => productos.remove(p)),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 8),
-            CheckboxListTile(
-              value: pagoCompleto,
-              onChanged: (v) {
-                setState(() {
-                  pagoCompleto = v ?? false;
-                  if (pagoCompleto) {
-                    montoSenado = montoTotal;
-                  }
-                });
-              },
-              title: const Text('Pago completo'),
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-            if (!pagoCompleto)
-              TextField(
-                decoration: const InputDecoration(
-                  labelText: 'Monto señado (USD)',
-                ),
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
-                onChanged: (v) => montoSenado = double.tryParse(v) ?? 0,
-              ),
-            if (pagoCompleto)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  'Monto total: USD ${montoTotal.toStringAsFixed(2)}',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancelar'),
-        ),
-        ElevatedButton(
-          onPressed: () {
-            if (cliente.isNotEmpty && productos.isNotEmpty) {
-              Navigator.pop(
-                context,
-                Pedido(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                  clienteNombre: cliente,
-                  fecha: DateTime.now(),
-                  estado: PedidoEstado.pendiente,
-                  montoSenado: pagoCompleto ? montoTotal : montoSenado,
-                  productos: productos,
-                ),
-              );
-            } else {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Completa cliente y productos')),
-              );
-            }
-          },
-          child: const Text('Guardar'),
-        ),
-      ],
-    );
-  }
-}
-
-// Diálogo para ver/editar detalle de pedido
-class _PedidoDetalleDialog extends StatelessWidget {
-  final Pedido pedido;
-  final void Function(PedidoEstado)? onEstadoChange;
-  final VoidCallback? onEliminar;
-  const _PedidoDetalleDialog({
-    required this.pedido,
-    this.onEstadoChange,
-    this.onEliminar,
+    required this.historial,
+    this.medioPago = '',
+    this.fiado = false,
+    this.descuentoMonto = 0,
+    this.descuentoTipo = '',
+    this.descuentoValor = 0,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('Detalle de Pedido'),
-      content: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Cliente: ${pedido.clienteNombre}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Fecha: ${pedido.fecha.day}/${pedido.fecha.month}/${pedido.fecha.year}',
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                _EstadoChip(estado: pedido.estado),
-                const SizedBox(width: 12),
-                Text('Seña: USD ${pedido.montoSenado.toStringAsFixed(2)}'),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Productos:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            ...pedido.productos.map((p) => Text('${p.nombre} x${p.cantidad}')),
-          ],
-        ),
-      ),
-      actions: [
-        if (pedido.estado == PedidoEstado.pendiente && onEstadoChange != null)
-          ElevatedButton(
-            onPressed: () => onEstadoChange!(PedidoEstado.pagado),
-            child: const Text('Marcar como Pagado'),
-          ),
-        if (pedido.estado == PedidoEstado.pagado && onEstadoChange != null)
-          ElevatedButton(
-            onPressed: () => onEstadoChange!(PedidoEstado.entregado),
-            child: const Text('Marcar como Entregado'),
-          ),
-        if (onEliminar != null)
-          TextButton(
-            onPressed: onEliminar,
-            child: const Text('Eliminar', style: TextStyle(color: Colors.red)),
-          ),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cerrar'),
-        ),
-      ],
+  final int id;
+  final String clienteNombre;
+  final DateTime fecha;
+  final String estado;
+  final double montoSenado;
+  final List<ProductoPedido> productos;
+  final List<_CambioVista> historial;
+  final String medioPago;
+  final bool fiado;
+  final double descuentoMonto;
+  final String descuentoTipo;
+  final double descuentoValor;
+
+  double get subtotal => calcularMontoTotal([
+        for (final producto in productos)
+          (precioVenta: producto.precio, cantidad: producto.cantidad),
+      ]);
+
+  double get total {
+    final neto = subtotal - (descuentoMonto < 0 ? 0 : descuentoMonto);
+    return neto < 0 ? 0 : neto;
+  }
+
+  _PedidoVista copiar({
+    String? estado,
+    double? montoSenado,
+    List<_CambioVista>? historial,
+  }) {
+    return _PedidoVista(
+      id: id,
+      clienteNombre: clienteNombre,
+      fecha: fecha,
+      estado: estado ?? this.estado,
+      montoSenado: montoSenado ?? this.montoSenado,
+      productos: productos,
+      historial: historial ?? this.historial,
+      medioPago: medioPago,
+      fiado: fiado,
+      descuentoMonto: descuentoMonto,
+      descuentoTipo: descuentoTipo,
+      descuentoValor: descuentoValor,
     );
   }
 }
 
-double? _parseMonto(String raw) {
-  final texto = raw.trim().replaceAll(',', '.');
-  if (texto.isEmpty) return null;
-  return double.tryParse(texto);
+class _CambioVista {
+  const _CambioVista({
+    required this.anterior,
+    required this.nuevo,
+    required this.fecha,
+  });
+
+  final String anterior;
+  final String nuevo;
+  final DateTime fecha;
 }
 
-String _fechaCorta(DateTime fecha) => '${fecha.day}/${fecha.month}/${fecha.year}';
+class _LineaUi {
+  const _LineaUi({
+    required this.productoId,
+    required this.nombre,
+    required this.cantidad,
+    required this.precio,
+    this.unidad = '',
+    this.variante = '',
+  });
 
-String _fechaHora(DateTime fecha) {
-  final hora = fecha.hour.toString().padLeft(2, '0');
-  final minuto = fecha.minute.toString().padLeft(2, '0');
-  return '${_fechaCorta(fecha)} $hora:$minuto';
+  final int? productoId;
+  final String nombre;
+  final int cantidad;
+  final double precio;
+  final String unidad;
+  final String variante;
+
+  double get subtotal => precio * cantidad;
+
+  String get titulo {
+    final extras = <String>[
+      if (variante.isNotEmpty) variante,
+      if (unidad.isNotEmpty) unidad,
+    ];
+    final detalle = extras.isEmpty ? '' : ' · ${extras.join(' · ')}';
+    return '$nombre$detalle x$cantidad';
+  }
 }
 
-String _usd(double valor) => 'USD ${valor.toStringAsFixed(2)}';
+class _BorradorPedido {
+  const _BorradorPedido({
+    required this.clienteId,
+    required this.clienteNombre,
+    required this.montoSenado,
+    required this.lineas,
+    this.medioPago = '',
+    this.fiado = false,
+    this.diaCobro,
+    this.descuentoTipo = '',
+    this.descuentoValor = 0,
+    this.descuentoMonto = 0,
+  });
 
-class _PedidosDbScreen extends StatefulWidget {
-  final AppDatabase database;
-
-  const _PedidosDbScreen({required this.database});
-
-  @override
-  State<_PedidosDbScreen> createState() => _PedidosDbScreenState();
+  final int? clienteId;
+  final String clienteNombre;
+  final double montoSenado;
+  final List<_LineaUi> lineas;
+  final String medioPago;
+  final bool fiado;
+  final DateTime? diaCobro;
+  final String descuentoTipo;
+  final double descuentoValor;
+  final double descuentoMonto;
 }
 
-class _PedidosDbScreenState extends State<_PedidosDbScreen> {
-  late final PedidoRepository _repo = PedidoRepository(widget.database);
-  List<PedidoResumen> _pedidos = [];
+class _PedidosScreenState extends State<PedidosScreen> {
+  PedidoRepository? _repo;
+  List<_PedidoVista> _pedidos = [];
   bool _cargando = true;
   String? _error;
-  String _filtroEstado = 'todos';
-  String _filtroCliente = '';
-
-  static const _estadosFiltro = ['todos', ...EstadosPedido.valores];
+  String _filtro = 'todos';
+  String _consulta = '';
 
   @override
   void initState() {
     super.initState();
-    _cargar();
+    _vincular(widget.database, notificar: false);
+  }
+
+  @override
+  void didUpdateWidget(PedidosScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.database != widget.database) {
+      _vincular(widget.database, notificar: true);
+    }
+  }
+
+  void _vincular(AppDatabase? database, {required bool notificar}) {
+    void aplicar() {
+      _error = null;
+      if (database == null) {
+        _repo = null;
+        _pedidos = _demo();
+        _cargando = false;
+        return;
+      }
+      _repo = PedidoRepository(database);
+      _pedidos = [];
+      _cargando = true;
+    }
+
+    if (notificar) {
+      setState(aplicar);
+    } else {
+      aplicar();
+    }
+    if (database != null) _cargar();
+  }
+
+  List<_PedidoVista> _demo() {
+    final ahora = DateTime.now();
+    return [
+      _PedidoVista(
+        id: 1,
+        clienteNombre: 'Kevin',
+        fecha: ahora.subtract(const Duration(days: 1)),
+        estado: PedidoEstado.pendienteDePago.texto,
+        montoSenado: 10,
+        productos: const [
+          ProductoPedido(nombre: 'Powerbank', cantidad: 2, precio: 15),
+          ProductoPedido(nombre: 'Cable USB', cantidad: 5, precio: 2),
+        ],
+        historial: const [],
+      ),
+      _PedidoVista(
+        id: 2,
+        clienteNombre: 'Nildo',
+        fecha: ahora,
+        estado: PedidoEstado.pagado.texto,
+        montoSenado: 20,
+        productos: const [
+          ProductoPedido(nombre: 'Cargador rápido', cantidad: 1, precio: 20),
+        ],
+        historial: const [],
+      ),
+    ];
   }
 
   Future<void> _cargar() async {
+    final repo = _repo;
+    if (repo == null) return;
     try {
-      final pedidos = await _repo.listarPedidos();
+      final pedidos = await repo.listarPedidos();
+      final metas = await const AmpliacionLocal().cargar();
       if (!mounted) return;
       setState(() {
-        _pedidos = pedidos;
+        _pedidos = [
+          for (final pedido in pedidos)
+            _vistaDe(pedido, metas.pedidos[pedido.id]),
+        ];
         _cargando = false;
         _error = null;
       });
@@ -575,871 +268,1927 @@ class _PedidosDbScreenState extends State<_PedidosDbScreen> {
     }
   }
 
-  List<PedidoResumen> get _filtrados {
-    final consulta = _filtroCliente.trim().toLowerCase();
-    return _pedidos.where((pedido) {
-      final estadoOk =
-          _filtroEstado == 'todos' || pedido.estado == _filtroEstado;
+  _PedidoVista _vistaDe(PedidoResumen pedido, MetaPedido? meta) {
+    final productos = _productosVisibles(pedido, meta);
+    final subtotal = calcularMontoTotal([
+      for (final producto in productos)
+        (precioVenta: producto.precio, cantidad: producto.cantidad),
+    ]);
+    return _PedidoVista(
+      id: pedido.id,
+      clienteNombre: pedido.clienteNombre,
+      fecha: pedido.fecha,
+      estado: pedido.estado,
+      montoSenado: pedido.montoSenado,
+      productos: productos,
+      historial: [
+        for (final cambio in pedido.historial)
+          _CambioVista(
+            anterior: cambio.estadoAnterior,
+            nuevo: cambio.estadoNuevo,
+            fecha: cambio.fechaCambio,
+          ),
+      ],
+      medioPago: meta?.medioPago ?? '',
+      fiado: meta?.fiado ?? false,
+      descuentoMonto: meta?.descuentoSobre(subtotal) ?? 0,
+      descuentoTipo: meta?.descuentoTipo ?? '',
+      descuentoValor: meta?.descuentoValor ?? 0,
+    );
+  }
+
+  List<ProductoPedido> _productosVisibles(
+    PedidoResumen pedido,
+    MetaPedido? meta,
+  ) {
+    final detalladas = meta?.lineas ?? const <LineaMeta>[];
+    if (detalladas.isEmpty) {
+      return [
+        for (final item in pedido.items)
+          ProductoPedido(
+            nombre: item.nombre,
+            cantidad: item.cantidad,
+            precio: meta?.precioDe(item.productoId) ?? item.precioVenta,
+          ),
+      ];
+    }
+    final nombres = {
+      for (final item in pedido.items) item.productoId: item.nombre,
+    };
+    final cubiertos = <int, int>{};
+    final productos = <ProductoPedido>[];
+    for (final linea in detalladas) {
+      cubiertos.update(
+        linea.productoId,
+        (actual) => actual + linea.cantidad,
+        ifAbsent: () => linea.cantidad,
+      );
+      productos.add(
+        ProductoPedido(
+          nombre: _nombreConDetalle(
+            nombres[linea.productoId] ?? 'Producto ${linea.productoId}',
+            linea,
+          ),
+          cantidad: linea.cantidad,
+          precio: linea.precio,
+        ),
+      );
+    }
+    for (final item in pedido.items) {
+      final resto = item.cantidad - (cubiertos[item.productoId] ?? 0);
+      if (resto <= 0) continue;
+      productos.add(
+        ProductoPedido(
+          nombre: item.nombre,
+          cantidad: resto,
+          precio: meta?.precioDe(item.productoId) ?? item.precioVenta,
+        ),
+      );
+    }
+    return productos;
+  }
+
+  List<_PedidoVista> get _filtrados {
+    final consulta = _consulta.trim().toLowerCase();
+    final lista = _pedidos.where((pedido) {
+      final leido = PedidoEstados.leer(pedido.estado);
+      final filtro = _filtro == 'todos' ? null : PedidoEstados.leer(_filtro);
+      final estadoOk = filtro == null || leido == filtro;
       final clienteOk = consulta.isEmpty ||
           pedido.clienteNombre.toLowerCase().contains(consulta);
       return estadoOk && clienteOk;
     }).toList();
+    lista.sort((a, b) {
+      final porFecha = b.fecha.compareTo(a.fecha);
+      if (porFecha != 0) return porFecha;
+      return b.id.compareTo(a.id);
+    });
+    return lista;
   }
 
-  Future<void> _nuevoPedido() async {
-    final creado = await showDialog<bool>(
-      context: context,
-      builder: (context) => _NuevoPedidoDbDialog(repo: _repo),
-    );
-    if (creado == true && mounted) {
-      await _cargar();
+  void _avisar(String mensaje) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(mensaje)));
+  }
+
+  Future<_PedidoVista> _cambiar(
+    _PedidoVista pedido,
+    PedidoEstado destino,
+  ) async {
+    if (!PedidoEstados.puedePasar(pedido.estado, destino)) {
+      throw StateError('Esa transición no está permitida.');
     }
+    final repo = _repo;
+    if (repo == null) {
+      final actualizado = pedido.copiar(
+        estado: destino.texto,
+        historial: [
+          _CambioVista(
+            anterior: pedido.estado,
+            nuevo: destino.texto,
+            fecha: DateTime.now(),
+          ),
+          ...pedido.historial,
+        ],
+      );
+      if (!mounted) return actualizado;
+      setState(() {
+        final index = _pedidos.indexWhere((item) => item.id == pedido.id);
+        if (index >= 0) _pedidos[index] = actualizado;
+      });
+      return actualizado;
+    }
+
+    await repo.cambiarEstado(pedido.id, destino.texto);
+    if (!mounted) return pedido;
+    await _cargar();
+    if (!mounted) return pedido;
+    for (final item in _pedidos) {
+      if (item.id == pedido.id) return item;
+    }
+    throw StateError('El pedido no existe.');
   }
 
-  Future<void> _eliminarPedido(PedidoResumen pedido) async {
-    final confirmar = await showDialog<bool>(
+  Future<void> _nuevoPedido({bool ventaDirecta = false}) async {
+    final repo = _repo;
+    var clientes = const <ClientePedido>[];
+    var productos = const <ProductoPedidoOpcion>[];
+    var fichas = const <int, FichaProducto>{};
+    var tomadas = const <int, Set<String>>{};
+    if (repo != null) {
+      try {
+        clientes = await repo.listarClientes();
+        productos = await repo.listarProductos();
+        final doc = await const AmpliacionLocal().cargar();
+        final pedidos = await repo.listarPedidos();
+        fichas = doc.fichas;
+        tomadas = const AmpliacionLocal().unidadesEnPedidos(doc, [
+          for (final pedido in pedidos)
+            if (PedidoEstados.leer(pedido.estado) != PedidoEstado.cancelado)
+              pedido.id,
+        ]);
+      } catch (_) {
+        if (!mounted) return;
+        const mensaje = 'No se pudieron cargar clientes y productos.';
+        setState(() => _error = mensaje);
+        _avisar(mensaje);
+        return;
+      }
+    }
+    if (!mounted) return;
+
+    final borrador = await showDialog<_BorradorPedido>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Eliminar pedido'),
-        content: const Text('¿Seguro que deseas eliminar este pedido?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Eliminar'),
-          ),
-        ],
+      builder: (context) => _NuevoPedidoDialog(
+        clientes: clientes,
+        productos: productos,
+        fichas: fichas,
+        unidadesTomadas: tomadas,
+        ventaDirecta: ventaDirecta,
       ),
     );
-    if (confirmar != true || !mounted) return;
+    if (borrador == null || !mounted) return;
+
+    if (repo == null) {
+      _guardarEnMemoria(borrador);
+      return;
+    }
+
     try {
-      await _repo.eliminarPedido(pedido.id);
+      final id = await repo.crearPedido(
+        clienteId: borrador.clienteId,
+        clienteNombre:
+            borrador.clienteId == null ? borrador.clienteNombre : null,
+        montoSenado: borrador.montoSenado,
+        descuento: borrador.descuentoMonto,
+        medioPago: borrador.medioPago,
+        fiado: borrador.fiado,
+        lineas: [
+          for (final linea in borrador.lineas)
+            LineaPedidoBorrador(
+              productoId: linea.productoId,
+              nombreNuevo: linea.productoId == null ? linea.nombre : null,
+              precioVenta: linea.precio,
+              cantidad: linea.cantidad,
+              pisarPrecioCatalogo: linea.variante.isEmpty,
+            ),
+        ],
+      );
+      final precios = <int, double>{};
+      final detalladas = <LineaMeta>[];
+      for (final linea in borrador.lineas) {
+        final productoId = linea.productoId;
+        if (productoId == null) continue;
+        precios[productoId] = linea.precio;
+        if (linea.unidad.isEmpty && linea.variante.isEmpty) continue;
+        detalladas.add(
+          LineaMeta(
+            productoId: productoId,
+            cantidad: linea.cantidad,
+            precio: linea.precio,
+            unidad: linea.unidad,
+            variante: linea.variante,
+          ),
+        );
+      }
+      await const AmpliacionLocal().marcarPedido(
+        pedidoId: id,
+        origen: ventaDirecta ? 'venta' : 'local',
+        precios: precios,
+        lineas: detalladas,
+        medioPago: borrador.medioPago,
+        fiado: borrador.fiado,
+        descuentoTipo: borrador.descuentoTipo,
+        descuentoValor: borrador.descuentoValor,
+        descuentoMonto: borrador.descuentoMonto,
+      );
+      if (borrador.fiado &&
+          borrador.diaCobro != null &&
+          borrador.clienteNombre.trim().isNotEmpty) {
+        await const CobroLocal().guardar(
+          persona: borrador.clienteNombre,
+          fecha: borrador.diaCobro,
+        );
+      }
+      if (ventaDirecta) {
+        await repo.cambiarEstado(id, PedidoEstado.confirmado.texto);
+      }
+    } catch (error) {
       if (!mounted) return;
+      final mensaje = _mensajeDe(error);
+      setState(() => _error = mensaje);
+      _avisar(mensaje);
       await _cargar();
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _error = 'No se pudo eliminar el pedido.');
+      return;
+    }
+
+    if (!mounted) return;
+    await _cargar();
+  }
+
+  void _guardarEnMemoria(_BorradorPedido borrador) {
+    try {
+      final subtotal = calcularMontoTotal([
+        for (final linea in borrador.lineas)
+          (precioVenta: linea.precio, cantidad: linea.cantidad),
+      ]);
+      final descuento = borrador.descuentoMonto < 0 ? 0.0 : borrador.descuentoMonto;
+      if (descuento > subtotal + 0.009) {
+        throw ArgumentError('El descuento no puede superar el total.');
+      }
+      final neto = subtotal - descuento;
+      final estado = PedidoEstados.estadoInicial(
+        sena: borrador.montoSenado,
+        total: neto < 0 ? 0 : neto,
+      );
+      final id = _siguienteId();
+      setState(() {
+        _pedidos.add(
+          _PedidoVista(
+            id: id,
+            clienteNombre: borrador.clienteNombre,
+            fecha: DateTime.now(),
+            estado: estado,
+            montoSenado: borrador.montoSenado,
+            productos: [
+              for (final linea in borrador.lineas)
+                ProductoPedido(
+                  nombre: linea.nombre,
+                  cantidad: linea.cantidad,
+                  precio: linea.precio,
+                ),
+            ],
+            historial: const [],
+            medioPago: borrador.medioPago,
+            fiado: borrador.fiado,
+            descuentoMonto: descuento,
+            descuentoTipo: borrador.descuentoTipo,
+            descuentoValor: borrador.descuentoValor,
+          ),
+        );
+        _error = null;
+      });
+    } catch (error) {
+      final mensaje = _mensajeDe(error);
+      setState(() => _error = mensaje);
+      _avisar(mensaje);
     }
   }
 
-  Future<void> _verDetalle(PedidoResumen pedido) async {
+  int _siguienteId() {
+    var maximo = 0;
+    for (final pedido in _pedidos) {
+      if (pedido.id > maximo) maximo = pedido.id;
+    }
+    return maximo + 1;
+  }
+
+  Future<void> _abrirDetalle(_PedidoVista pedido) async {
     await showDialog<void>(
       context: context,
-      builder: (context) => _PedidoDbDetalleDialog(
-        repo: _repo,
-        pedidoInicial: pedido,
-        onActualizado: _cargar,
+      builder: (context) => _DetalleDialog(
+        pedido: pedido,
+        conStock: _repo != null,
+        onCambiar: (destino) => _cambiar(pedido, destino),
+        onPagar: (pago) => _registrarPago(pedido, pago),
       ),
     );
+  }
+
+  Future<_PedidoVista> _registrarPago(_PedidoVista pedido, double pago) async {
+    final repo = _repo;
+    if (repo == null) {
+      final nuevoMonto = pedido.montoSenado + pago;
+      final leido = PedidoEstados.leer(pedido.estado);
+      var estado = pedido.estado;
+      if (nuevoMonto + 0.001 >= pedido.total &&
+          (leido == PedidoEstado.pendiente ||
+              leido == PedidoEstado.pendienteDePago)) {
+        estado = PedidoEstado.pagado.texto;
+      } else if (pedido.montoSenado <= 0 &&
+          nuevoMonto + 0.001 < pedido.total &&
+          leido == PedidoEstado.pendiente) {
+        estado = PedidoEstado.pendienteDePago.texto;
+      }
+      final actualizado = pedido.copiar(
+        estado: estado,
+        montoSenado: nuevoMonto,
+        historial: estado == pedido.estado
+            ? pedido.historial
+            : [
+                _CambioVista(
+                  anterior: pedido.estado,
+                  nuevo: estado,
+                  fecha: DateTime.now(),
+                ),
+                ...pedido.historial,
+              ],
+      );
+      if (!mounted) return actualizado;
+      setState(() {
+        final index = _pedidos.indexWhere((item) => item.id == pedido.id);
+        if (index >= 0) _pedidos[index] = actualizado;
+      });
+      return actualizado;
+    }
+
+    await repo.registrarSena(pedidoId: pedido.id, pago: pago);
+    if (!mounted) return pedido;
+    await _cargar();
+    if (!mounted) return pedido;
+    for (final item in _pedidos) {
+      if (item.id == pedido.id) return item;
+    }
+    return pedido;
+  }
+
+  Future<void> _cancelarDesdeLista(_PedidoVista pedido) async {
+    final confirma = await _preguntarCancelar(context);
+    if (!confirma || !mounted) return;
+    try {
+      await _cambiar(pedido, PedidoEstado.cancelado);
+      if (!mounted) return;
+      _avisar('Quedó cancelado. El historial se conserva.');
+    } catch (error) {
+      if (!mounted) return;
+      final mensaje = _mensajeDe(error);
+      setState(() => _error = mensaje);
+      _avisar(mensaje);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: AppColors.fondoClaro,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(
+        title: const Text(
           'Pedidos',
-          style: Theme.of(context).textTheme.titleLarge,
+          style: TextStyle(
+            color: AppColors.texto,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
+        backgroundColor: AppColors.primario,
+        foregroundColor: Colors.white,
         onPressed: _nuevoPedido,
+        tooltip: 'Nuevo pedido',
         child: const Icon(Icons.add),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: InputDecoration(
-                      labelText: 'Buscar por cliente',
-                      prefixIcon: Icon(
-                        Icons.search,
-                        color: Theme.of(context).iconTheme.color,
-                      ),
-                    ),
-                    onChanged: (valor) => setState(() => _filtroCliente = valor),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                DropdownButton<String>(
-                  value: _filtroEstado,
-                  items: _estadosFiltro
-                      .map(
-                        (estado) => DropdownMenuItem(
-                          value: estado,
-                          child: Text(
-                            estado == 'todos'
-                                ? 'Todos'
-                                : EstadosPedido.etiqueta(estado),
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (valor) {
-                    if (valor == null) return;
-                    setState(() => _filtroEstado = valor);
-                  },
-                ),
-              ],
+            TextField(
+              style: const TextStyle(color: AppColors.texto),
+              decoration: const InputDecoration(
+                labelText: 'Buscar por cliente',
+                prefixIcon: Icon(Icons.search, color: AppColors.primario),
+              ),
+              onChanged: (valor) => setState(() => _consulta = valor),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _nuevoPedido(ventaDirecta: true),
+                icon: const Icon(Icons.point_of_sale, color: AppColors.primario),
+                label: const Text('Venta directa'),
+              ),
+            ),
+            _filtros(),
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   _error!,
-                  style: const TextStyle(color: Colors.red),
+                  style: const TextStyle(color: AppColors.alerta),
                 ),
               ),
-            Expanded(child: _buildLista()),
+            const SizedBox(height: 8),
+            Expanded(
+              child: RefreshIndicator(
+                color: AppColors.primario,
+                onRefresh: _cargar,
+                child: _contenido(),
+              ),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildLista() {
+  Widget _filtros() {
+    const opciones = ['todos', ...PedidoEstados.valores];
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final opcion in opciones)
+          FilterChip(
+            label: Text(
+              opcion == 'todos' ? 'Todos' : PedidoEstados.etiqueta(opcion),
+            ),
+            selected: _filtro == opcion,
+            showCheckmark: false,
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            backgroundColor: _colorFiltro(opcion).withValues(alpha: 0.08),
+            selectedColor: _colorFiltro(opcion).withValues(alpha: 0.18),
+            side: BorderSide(
+              color: _colorFiltro(opcion).withValues(
+                alpha: _filtro == opcion ? 0.9 : 0.35,
+              ),
+            ),
+            labelStyle: TextStyle(
+              color: _colorFiltro(opcion),
+              fontWeight: FontWeight.w700,
+            ),
+            onSelected: (_) => setState(() => _filtro = opcion),
+          ),
+      ],
+    );
+  }
+
+  Color _colorFiltro(String opcion) {
+    if (opcion == 'todos') return AppColors.primario;
+    return colorPedidoEstado(opcion);
+  }
+
+  Widget _contenido() {
     if (_cargando && _pedidos.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    final pedidos = _filtrados;
-    if (pedidos.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: const [
-          SizedBox(height: 48),
-          Center(child: Text('No hay pedidos para mostrar.')),
+          SizedBox(height: 120),
+          Center(child: CircularProgressIndicator()),
+        ],
+      );
+    }
+    final pedidos = _filtrados;
+    if (pedidos.isEmpty) {
+      final mensaje = _pedidos.isEmpty
+          ? (_error == null
+              ? 'Todavía no hay pedidos.\nTocá + para cargar uno.'
+              : 'Probá de nuevo deslizando hacia abajo.')
+          : 'Ningún pedido coincide con ese filtro.';
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          const SizedBox(height: 72),
+          Text(
+            mensaje,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppColors.textoSuave),
+          ),
         ],
       );
     }
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 80),
-      children: pedidos.map(_tarjeta).toList(),
+      padding: const EdgeInsets.only(bottom: 88),
+      children: [for (final pedido in pedidos) _tarjeta(pedido)],
     );
   }
 
-  Widget _tarjeta(PedidoResumen pedido) {
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      color: Theme.of(context).cardColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: ListTile(
-        isThreeLine: true,
-        title: Text(
-          pedido.clienteNombre,
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Fecha: ${_fechaCorta(pedido.fecha)}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
+  Widget _tarjeta(_PedidoVista pedido) {
+    final puedeCancelar = PedidoEstados.siguientesDe(pedido.estado)
+        .contains(PedidoEstado.cancelado);
+    final resumen = pedido.productos.isEmpty
+        ? 'Sin productos'
+        : pedido.productos
+            .map((producto) => '${producto.nombre} x${producto.cantidad}')
+            .join(' · ');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: AppColors.tarjeta,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => _abrirDetalle(pedido),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _EstadoDbChip(estado: pedido.estado),
-                Text(
-                  'Total: ${_usd(pedido.montoTotal)}',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        pedido.clienteNombre,
+                        style: const TextStyle(
+                          color: AppColors.texto,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 18,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _fechaCorta(pedido.fecha),
+                        style: const TextStyle(color: AppColors.textoSuave),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        resumen,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppColors.textoSuave),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _EstadoChip(estado: pedido.estado),
+                          Text(
+                            'Total ${_usd(pedido.total)}',
+                            style: const TextStyle(color: AppColors.texto),
+                          ),
+                          Text(
+                            'Seña ${_usd(pedido.montoSenado)}',
+                            style: const TextStyle(color: AppColors.textoSuave),
+                          ),
+                          if (pedido.medioPago.isNotEmpty)
+                            Text(
+                              MetaPedido.etiquetaMedio(pedido.medioPago),
+                              style: const TextStyle(color: AppColors.textoSuave),
+                            ),
+                          if (pedido.fiado)
+                            const Text(
+                              'Fiado',
+                              style: TextStyle(
+                                color: AppColors.pendiente,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-                Text(
-                  'Seña: ${_usd(pedido.montoSenado)}',
-                  style: Theme.of(context).textTheme.bodyMedium,
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, color: AppColors.primario),
+                  onSelected: (valor) {
+                    if (valor == 'ver') {
+                      _abrirDetalle(pedido);
+                    } else if (valor == 'cancelar') {
+                      _cancelarDesdeLista(pedido);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'ver',
+                      child: Text('Ver detalle'),
+                    ),
+                    if (puedeCancelar)
+                      const PopupMenuItem(
+                        value: 'cancelar',
+                        child: Text('Cancelar'),
+                      ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
-        trailing: PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'ver') {
-              _verDetalle(pedido);
-            } else if (value == 'eliminar') {
-              _eliminarPedido(pedido);
-            }
-          },
-          itemBuilder: (context) => [
-            const PopupMenuItem(
-              value: 'ver',
-              child: Text('Ver/Editar'),
-            ),
-            if (pedido.estado == EstadosPedido.pendiente)
-              const PopupMenuItem(
-                value: 'eliminar',
-                child: Text('Eliminar'),
-              ),
-          ],
-        ),
-        onTap: () => _verDetalle(pedido),
       ),
     );
   }
 }
 
-class _EstadoDbChip extends StatelessWidget {
-  final String estado;
+class _EstadoChip extends StatelessWidget {
+  const _EstadoChip({required this.estado});
 
-  const _EstadoDbChip({required this.estado});
+  final String estado;
 
   @override
   Widget build(BuildContext context) {
-    final oscuro = Theme.of(context).brightness == Brightness.dark;
-    final Color color;
-    switch (estado) {
-      case EstadosPedido.pendiente:
-        color = oscuro ? const Color(0xFFFBC02D) : Colors.amber;
-        break;
-      case EstadosPedido.enProceso:
-        color = oscuro ? AppColors.azulClaro : AppColors.azul;
-        break;
-      case EstadosPedido.completado:
-        color = oscuro ? AppColors.lima : AppColors.tealFuerte;
-        break;
-      case EstadosPedido.cancelado:
-        color = Colors.red;
-        break;
-      default:
-        color = Theme.of(context).colorScheme.primary;
-    }
+    final color = colorPedidoEstado(estado);
     return Chip(
-      label: Text(EstadosPedido.etiqueta(estado)),
-      backgroundColor: color.withValues(alpha: 0.2),
-      labelStyle: TextStyle(color: color, fontWeight: FontWeight.bold),
+      visualDensity: VisualDensity.compact,
+      label: Text(PedidoEstados.etiqueta(estado)),
+      backgroundColor: color.withValues(alpha: 0.16),
+      side: BorderSide(color: color.withValues(alpha: 0.4)),
+      labelStyle: TextStyle(color: color, fontWeight: FontWeight.w700),
     );
   }
 }
 
-class _LineaBorrador {
-  final int? productoId;
-  final String nombre;
-  final int cantidad;
-  final double precioVenta;
-  final bool esNuevo;
-
-  const _LineaBorrador({
-    required this.productoId,
-    required this.nombre,
-    required this.cantidad,
-    required this.precioVenta,
-    required this.esNuevo,
+class _NuevoPedidoDialog extends StatefulWidget {
+  const _NuevoPedidoDialog({
+    required this.clientes,
+    required this.productos,
+    this.fichas = const {},
+    this.unidadesTomadas = const {},
+    this.ventaDirecta = false,
   });
 
-  _LineaBorrador copyWith({int? cantidad, double? precioVenta}) {
-    return _LineaBorrador(
-      productoId: productoId,
-      nombre: nombre,
-      cantidad: cantidad ?? this.cantidad,
-      precioVenta: precioVenta ?? this.precioVenta,
-      esNuevo: esNuevo,
-    );
-  }
-}
-
-class _NuevoPedidoDbDialog extends StatefulWidget {
-  final PedidoRepository repo;
-
-  const _NuevoPedidoDbDialog({required this.repo});
+  final List<ClientePedido> clientes;
+  final List<ProductoPedidoOpcion> productos;
+  final Map<int, FichaProducto> fichas;
+  final Map<int, Set<String>> unidadesTomadas;
+  final bool ventaDirecta;
 
   @override
-  State<_NuevoPedidoDbDialog> createState() => _NuevoPedidoDbDialogState();
+  State<_NuevoPedidoDialog> createState() => _NuevoPedidoDialogState();
 }
 
-class _NuevoPedidoDbDialogState extends State<_NuevoPedidoDbDialog> {
+class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
+  final _nombreClienteCtrl = TextEditingController();
   final _nombreCtrl = TextEditingController();
   final _precioCtrl = TextEditingController();
   final _cantidadCtrl = TextEditingController(text: '1');
   final _senaCtrl = TextEditingController();
+  final _descuentoCtrl = TextEditingController();
 
-  List<ClientePedido> _clientes = [];
-  List<ProductoPedidoOpcion> _productos = [];
-  final List<_LineaBorrador> _lineas = [];
+  final List<_LineaUi> _lineas = [];
   int? _clienteId;
   int? _productoId;
-  bool _modoNuevo = false;
+  String _variante = '';
+  String _unidad = '';
+  bool _modoNuevo = true;
   bool _pagoCompleto = false;
-  bool _cargando = true;
-  bool _guardando = false;
+  bool _fiado = false;
+  String _medioPago = '';
+  DateTime? _diaCobro;
+  String _descuentoModo = 'monto';
   String? _error;
 
-  double get _total => calcularMontoTotal(
-        _lineas.map(
-          (linea) => (precioVenta: linea.precioVenta, cantidad: linea.cantidad),
-        ),
-      );
+  double get _bruto => calcularMontoTotal([
+        for (final linea in _lineas)
+          (precioVenta: linea.precio, cantidad: linea.cantidad),
+      ]);
+
+  double? _descuentoIngresado() {
+    final texto = _descuentoCtrl.text.trim();
+    if (texto.isEmpty) return 0;
+    return _parseMonto(texto);
+  }
+
+  String? _errorDescuento() {
+    final texto = _descuentoCtrl.text.trim();
+    if (texto.isEmpty) return null;
+    final valor = _parseMonto(texto);
+    if (valor == null) return 'El descuento no es un número válido.';
+    if (valor < 0) return 'El descuento no puede ser negativo.';
+    if (_descuentoModo == 'porcentaje' && valor > 100.009) {
+      return 'El porcentaje no puede pasar de 100.';
+    }
+    if (_descuentoModo == 'monto' && valor > _bruto + 0.009) {
+      return 'El descuento no puede superar el total.';
+    }
+    return null;
+  }
+
+  double get _descuentoMonto {
+    if (_errorDescuento() != null) return 0;
+    final texto = _descuentoCtrl.text.trim();
+    if (texto.isEmpty) return 0;
+    return descuentoEnDinero(
+      bruto: _bruto,
+      tipo: _descuentoModo,
+      valor: _descuentoIngresado() ?? 0,
+    );
+  }
+
+  double get _total {
+    final neto = _bruto - _descuentoMonto;
+    return neto < 0 ? 0 : neto;
+  }
 
   @override
   void initState() {
     super.initState();
-    _cargarOpciones();
+    if (widget.clientes.isNotEmpty) {
+      _clienteId = widget.clientes.first.id;
+    }
+    if (widget.productos.isNotEmpty) {
+      _modoNuevo = false;
+      _productoId = widget.productos.first.id;
+      _aplicarPrecioDeProducto();
+    }
+    _senaCtrl.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _descuentoCtrl.addListener(() {
+      _syncSena();
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _nombreClienteCtrl.dispose();
     _nombreCtrl.dispose();
     _precioCtrl.dispose();
     _cantidadCtrl.dispose();
     _senaCtrl.dispose();
+    _descuentoCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _cargarOpciones() async {
-    try {
-      final clientes = await widget.repo.listarClientes();
-      final productos = await widget.repo.listarProductos();
-      if (!mounted) return;
-      setState(() {
-        _clientes = clientes;
-        _productos = productos;
-        _cargando = false;
-        if (clientes.isNotEmpty) _clienteId = clientes.first.id;
-        if (productos.isEmpty) {
-          _modoNuevo = true;
-        } else {
-          _productoId = productos.first.id;
-        }
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _cargando = false;
-        _error = 'No se pudieron cargar clientes y productos.';
-      });
+  FichaProducto? get _ficha {
+    final id = _productoId;
+    if (id == null || _modoNuevo) return null;
+    return widget.fichas[id];
+  }
+
+  List<VarianteLocal> get _variantes =>
+      _ficha?.variantes.where((variante) => variante.etiqueta.isNotEmpty).toList() ??
+      const [];
+
+  bool get _controlaStock => _ficha?.controlaStock ?? true;
+
+  bool get _pideVariante => _controlaStock && _variantes.isNotEmpty;
+
+  bool get _pideUnidad =>
+      _controlaStock &&
+      (_ficha?.unidades.any((unidad) => unidad.codigo.isNotEmpty) ?? false);
+
+  void _aplicarPrecioDeProducto() {
+    for (final producto in widget.productos) {
+      if (producto.id == _productoId) {
+        _precioCtrl.text = producto.precioVenta.toStringAsFixed(2);
+        _aplicarPrecioDeVariante();
+        return;
+      }
     }
   }
 
-  bool _esLaMisma(_LineaBorrador a, _LineaBorrador b) {
+  void _aplicarPrecioDeVariante() {
+    if (_variante.isEmpty) return;
+    for (final variante in _variantes) {
+      if (variante.etiqueta != _variante) continue;
+      final propio = variante.precio;
+      if (propio == null) return;
+      _precioCtrl.text = propio.toStringAsFixed(2);
+      return;
+    }
+  }
+
+  List<UnidadSerie> _unidadesElegibles(int productoId) {
+    final ficha = widget.fichas[productoId];
+    if (ficha == null) return const [];
+    final tomadas = widget.unidadesTomadas[productoId] ?? const <String>{};
+    final enPedido = <String>{
+      for (final linea in _lineas)
+        if (linea.productoId == productoId && linea.unidad.isNotEmpty)
+          linea.unidad.toLowerCase(),
+    };
+    return [
+      for (final unidad in ficha.unidades)
+        if (unidad.codigo.isNotEmpty &&
+            unidad.estado == 'disponible' &&
+            !tomadas.contains(unidad.codigo.toLowerCase()) &&
+            !enPedido.contains(unidad.codigo.toLowerCase()))
+          unidad,
+    ];
+  }
+
+  VarianteLocal? _varianteElegida() {
+    for (final variante in _variantes) {
+      if (variante.etiqueta == _variante) return variante;
+    }
+    return null;
+  }
+
+  bool _misma(_LineaUi a, _LineaUi b) {
+    if (a.unidad.isNotEmpty || b.unidad.isNotEmpty) return false;
+    if (a.variante.toLowerCase() != b.variante.toLowerCase()) return false;
     if (a.productoId != null && b.productoId != null) {
       return a.productoId == b.productoId;
     }
     return a.nombre.trim().toLowerCase() == b.nombre.trim().toLowerCase();
   }
 
-  void _sincronizarSena() {
+  void _sumar(_LineaUi linea) {
+    if (linea.unidad.isNotEmpty) {
+      _lineas.add(linea);
+      return;
+    }
+    final index = _lineas.indexWhere((actual) => _misma(actual, linea));
+    if (index >= 0) {
+      final previa = _lineas[index];
+      _lineas[index] = _LineaUi(
+        productoId: previa.productoId ?? linea.productoId,
+        nombre: previa.nombre,
+        cantidad: previa.cantidad + linea.cantidad,
+        precio: linea.precio,
+        variante: previa.variante,
+      );
+    } else {
+      _lineas.add(linea);
+    }
+  }
+
+  void _syncSena() {
     if (_pagoCompleto) {
       _senaCtrl.text = _total.toStringAsFixed(2);
     }
   }
 
-  void _sumarLinea(_LineaBorrador linea) {
-    setState(() {
-      final index = _lineas.indexWhere((actual) => _esLaMisma(actual, linea));
-      if (index >= 0) {
-        final previa = _lineas[index];
-        _lineas[index] = previa.copyWith(
-          cantidad: previa.cantidad + linea.cantidad,
-          precioVenta: linea.esNuevo ? linea.precioVenta : previa.precioVenta,
-        );
-      } else {
-        _lineas.add(linea);
-      }
-      _error = null;
-      _sincronizarSena();
-    });
+  double? _senaActual() {
+    if (_pagoCompleto) return _total;
+    final texto = _senaCtrl.text.trim();
+    if (texto.isEmpty) return 0;
+    return _parseMonto(texto);
   }
 
-  void _agregarExistente() {
-    final cantidad = int.tryParse(_cantidadCtrl.text.trim()) ?? 0;
-    ProductoPedidoOpcion? producto;
-    for (final item in _productos) {
-      if (item.id == _productoId) producto = item;
+  String _estadoPrevisto() {
+    final sena = _senaActual();
+    if (sena == null) return 'La seña no es un número válido.';
+    try {
+      return PedidoEstados.etiqueta(
+        PedidoEstados.estadoInicial(sena: sena, total: _total),
+      );
+    } on ArgumentError catch (error) {
+      final mensaje = error.message;
+      if (mensaje is String && mensaje.isNotEmpty) return mensaje;
+      return 'Revisá la seña.';
     }
-    if (producto == null || cantidad <= 0) {
-      setState(() {
-        _error = 'Elige un producto y una cantidad mayor a cero.';
-      });
-      return;
-    }
-    _sumarLinea(
-      _LineaBorrador(
-        productoId: producto.id,
-        nombre: producto.nombre,
-        cantidad: cantidad,
-        precioVenta: producto.precioVenta,
-        esNuevo: false,
-      ),
-    );
-    _cantidadCtrl.text = '1';
   }
 
-  void _agregarNuevo() {
-    final nombre = _nombreCtrl.text.trim();
-    final cantidad = int.tryParse(_cantidadCtrl.text.trim()) ?? 0;
+  void _agregar() {
+    final cantidadIngresada = int.tryParse(_cantidadCtrl.text.trim()) ?? 0;
+    final cantidad = !_modoNuevo && _pideUnidad ? 1 : cantidadIngresada;
     final precio = _parseMonto(_precioCtrl.text);
-    if (nombre.isEmpty || cantidad <= 0 || precio == null || precio < 0) {
+    if (cantidad <= 0 || precio == null || precio < 0) {
       setState(() {
-        _error = 'Completa nombre, cantidad y precio de venta.';
+        _error = 'Completá una cantidad mayor a cero y el precio.';
       });
       return;
     }
-    ProductoPedidoOpcion? existente;
-    for (final item in _productos) {
-      if (item.nombre.trim().toLowerCase() == nombre.toLowerCase()) {
-        existente = item;
-        break;
+
+    if (_modoNuevo || widget.productos.isEmpty) {
+      final nombre = _nombreCtrl.text.trim();
+      if (nombre.isEmpty) {
+        setState(() => _error = 'Escribí el nombre del producto.');
+        return;
       }
-    }
-    if (existente != null) {
-      _sumarLinea(
-        _LineaBorrador(
-          productoId: existente.id,
-          nombre: existente.nombre,
+      ProductoPedidoOpcion? existente;
+      for (final item in widget.productos) {
+        if (item.nombre.trim().toLowerCase() == nombre.toLowerCase()) {
+          existente = item;
+          break;
+        }
+      }
+      final fichaExistente = existente == null ? null : widget.fichas[existente.id];
+      final tieneDetalle = fichaExistente != null &&
+          fichaExistente.controlaStock &&
+          (fichaExistente.unidades.any((unidad) => unidad.codigo.isNotEmpty) ||
+              fichaExistente.variantes.any((variante) => variante.etiqueta.isNotEmpty));
+      if (tieneDetalle) {
+        setState(() {
+          _error =
+              'Ese producto tiene unidades o variantes. Elegilo en Existente para marcar cuál se vende.';
+        });
+        return;
+      }
+      _sumar(
+        _LineaUi(
+          productoId: existente?.id,
+          nombre: existente?.nombre ?? nombre,
           cantidad: cantidad,
-          precioVenta: existente.precioVenta,
-          esNuevo: false,
+          precio: precio,
         ),
       );
+      _nombreCtrl.clear();
+      _precioCtrl.clear();
     } else {
-      _sumarLinea(
-        _LineaBorrador(
-          productoId: null,
-          nombre: nombre,
-          cantidad: cantidad,
-          precioVenta: precio,
-          esNuevo: true,
+      ProductoPedidoOpcion? producto;
+      for (final item in widget.productos) {
+        if (item.id == _productoId) producto = item;
+      }
+      if (producto == null) {
+        setState(() => _error = 'Elegí un producto.');
+        return;
+      }
+      final detalle = _validarDetalle(producto.id, cantidad);
+      if (detalle != null) {
+        setState(() => _error = detalle);
+        return;
+      }
+      final unidad = _pideUnidad ? _unidad : '';
+      final variante = _pideVariante ? _variante : '';
+      _sumar(
+        _LineaUi(
+          productoId: producto.id,
+          nombre: producto.nombre,
+          cantidad: unidad.isEmpty ? cantidad : 1,
+          precio: precio,
+          unidad: unidad,
+          variante: variante,
         ),
       );
+      if (unidad.isNotEmpty) _unidad = '';
     }
-    _nombreCtrl.clear();
-    _precioCtrl.clear();
+
     _cantidadCtrl.text = '1';
+    setState(() => _error = null);
+    _syncSena();
   }
 
-  void _quitar(_LineaBorrador linea) {
+  String? _validarDetalle(int productoId, int cantidad) {
+    final ficha = widget.fichas[productoId];
+    if (ficha == null) return null;
+    if (_pideVariante) {
+      if (_variante.isEmpty) return 'Elegí la variante.';
+      final variante = _varianteElegida();
+      if (variante == null) return 'Esa variante ya no está.';
+      final enPedido = _lineas
+          .where(
+            (linea) =>
+                linea.productoId == productoId &&
+                linea.variante.toLowerCase() == variante.etiqueta.toLowerCase(),
+          )
+          .fold<int>(0, (suma, linea) => suma + linea.cantidad);
+      final pedida = _pideUnidad ? 1 : cantidad;
+      if (variante.stock <= 0 || pedida + enPedido > variante.stock) {
+        return 'No hay stock suficiente de ${variante.etiqueta}. Hay ${variante.stock}.';
+      }
+    }
+    if (_pideUnidad) {
+      if (_unidad.isEmpty) return 'Elegí la unidad disponible.';
+      final elegibles = _unidadesElegibles(productoId);
+      final ok = elegibles.any(
+        (unidad) => unidad.codigo.toLowerCase() == _unidad.toLowerCase(),
+      );
+      if (!ok) {
+        return 'Esa unidad no está disponible o ya está en otro pedido.';
+      }
+    }
+    return null;
+  }
+
+  void _quitar(int index) {
     setState(() {
-      _lineas.remove(linea);
+      _lineas.removeAt(index);
       _error = null;
-      _sincronizarSena();
+    });
+    _syncSena();
+  }
+
+  Future<void> _elegirDiaCobro() async {
+    final hoy = DateTime.now();
+    final elegida = await showDatePicker(
+      context: context,
+      initialDate: _diaCobro ?? hoy,
+      firstDate: DateTime(hoy.year, hoy.month, hoy.day),
+      lastDate: DateTime(hoy.year + 3, hoy.month, hoy.day),
+      helpText: 'Día de cobro',
+      cancelText: 'Cancelar',
+      confirmText: 'Elegir',
+    );
+    if (elegida == null || !mounted) return;
+    setState(() {
+      _diaCobro = DateTime(elegida.year, elegida.month, elegida.day);
     });
   }
 
-  Future<void> _guardar() async {
-    if (_guardando) return;
-    final clienteId = _clienteId;
-    if (clienteId == null) {
-      setState(() => _error = 'Elige un cliente existente.');
+  void _guardar() {
+    final nombreLibre = _nombreClienteCtrl.text.trim();
+    final int? clienteId;
+    final String clienteNombre;
+    if (nombreLibre.isNotEmpty) {
+      clienteId = null;
+      clienteNombre = nombreLibre;
+    } else if (_clienteId != null) {
+      clienteId = _clienteId;
+      String nombre = '';
+      for (final cliente in widget.clientes) {
+        if (cliente.id == _clienteId) nombre = cliente.nombre;
+      }
+      clienteNombre = nombre;
+    } else {
+      setState(() {
+        _error = widget.clientes.isEmpty
+            ? 'Escribí el nombre del cliente.'
+            : 'Elegí un cliente o escribí su nombre.';
+      });
+      return;
+    }
+    if (clienteId == null && clienteNombre.isEmpty) {
+      setState(() => _error = 'Escribí el nombre del cliente.');
       return;
     }
     if (_lineas.isEmpty) {
-      setState(() => _error = 'Agrega al menos un producto.');
+      setState(() => _error = 'Agregá al menos un producto.');
       return;
     }
 
-    final double sena;
-    if (_pagoCompleto) {
-      sena = _total;
-    } else {
-      final texto = _senaCtrl.text.trim();
-      if (texto.isEmpty) {
-        sena = 0;
-      } else {
-        final parseado = _parseMonto(texto);
-        if (parseado == null) {
-          setState(() => _error = 'La seña no es un número válido.');
-          return;
-        }
-        sena = parseado;
-      }
+    final errorDescuento = _errorDescuento();
+    if (errorDescuento != null) {
+      setState(() => _error = errorDescuento);
+      return;
+    }
+    final valorDescuento = _descuentoIngresado() ?? 0;
+    final descuento = _descuentoCtrl.text.trim().isEmpty
+        ? 0.0
+        : descuentoEnDinero(
+            bruto: _bruto,
+            tipo: _descuentoModo,
+            valor: valorDescuento,
+          );
+
+    final sena = _senaActual();
+    if (sena == null) {
+      setState(() => _error = 'La seña no es un número válido.');
+      return;
     }
     if (sena < 0) {
       setState(() => _error = 'La seña no puede ser negativa.');
       return;
     }
-
-    setState(() {
-      _guardando = true;
-      _error = null;
-    });
-    try {
-      await widget.repo.crearPedido(
-        clienteId: clienteId,
-        montoSenado: sena,
-        lineas: [
-          for (final linea in _lineas)
-            if (linea.productoId != null)
-              LineaPedidoBorrador(
-                productoId: linea.productoId,
-                cantidad: linea.cantidad,
-              )
-            else
-              LineaPedidoBorrador(
-                nombreNuevo: linea.nombre,
-                precioVenta: linea.precioVenta,
-                cantidad: linea.cantidad,
-              ),
-        ],
-      );
-      if (!mounted) return;
-      Navigator.pop(context, true);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _guardando = false;
-        _error = 'No se pudo guardar el pedido.';
-      });
+    if (sena > _total + 0.009) {
+      setState(() => _error = 'La seña no puede ser mayor al total.');
+      return;
     }
+    if (_medioPago.isEmpty && !_fiado) {
+      setState(() {
+        _error = 'Elegí efectivo, transferencia, otro o fiado.';
+      });
+      return;
+    }
+
+    Navigator.pop(
+      context,
+      _BorradorPedido(
+        clienteId: clienteId,
+        clienteNombre: clienteNombre,
+        montoSenado: sena,
+        lineas: List<_LineaUi>.of(_lineas),
+        medioPago: _medioPago,
+        fiado: _fiado,
+        diaCobro: _fiado ? _diaCobro : null,
+        descuentoTipo: descuento > 0 ? _descuentoModo : '',
+        descuentoValor: descuento > 0 ? valorDescuento : 0,
+        descuentoMonto: descuento,
+      ),
+    );
+  }
+
+  Widget _selectorVariante() {
+    final vistas = <String>{};
+    final opciones = [
+      for (final variante in _variantes)
+        if (vistas.add(variante.etiqueta)) variante,
+    ];
+    return DropdownButton<String>(
+      isExpanded: true,
+      value: opciones.any((variante) => variante.etiqueta == _variante)
+          ? _variante
+          : null,
+      hint: const Text(
+        'Elegí la variante',
+        style: TextStyle(color: AppColors.textoSuave),
+      ),
+      items: [
+        for (final variante in opciones)
+          DropdownMenuItem(
+            value: variante.etiqueta,
+            child: Text(
+              variante.stock <= 0
+                  ? '${variante.etiqueta} · agotada'
+                  : variante.precio == null
+                      ? '${variante.etiqueta} · stock ${variante.stock}'
+                      : '${variante.etiqueta} · stock ${variante.stock} · ${_usd(variante.precio!)}',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.texto),
+            ),
+          ),
+      ],
+      onChanged: (valor) {
+        setState(() {
+          _variante = valor ?? '';
+          _error = null;
+          _aplicarPrecioDeVariante();
+        });
+      },
+    );
+  }
+
+  Widget _selectorUnidad() {
+    final productoId = _productoId;
+    final elegibles =
+        productoId == null ? const <UnidadSerie>[] : _unidadesElegibles(productoId);
+    if (elegibles.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.only(top: 8, bottom: 4),
+        child: Text(
+          'No hay unidades disponibles de este producto.',
+          style: TextStyle(color: AppColors.alerta),
+        ),
+      );
+    }
+    return DropdownButton<String>(
+      isExpanded: true,
+      value: elegibles.any((unidad) => unidad.codigo == _unidad) ? _unidad : null,
+      hint: const Text(
+        'Elegí la unidad (serie o IMEI)',
+        style: TextStyle(color: AppColors.textoSuave),
+      ),
+      items: [
+        for (final unidad in elegibles)
+          DropdownMenuItem(
+            value: unidad.codigo,
+            child: Text(
+              unidad.codigo,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.texto),
+            ),
+          ),
+      ],
+      onChanged: (valor) => setState(() {
+        _unidad = valor ?? '';
+        _error = null;
+      }),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final errorDescuento = _errorDescuento();
+    final previsto = errorDescuento ?? _estadoPrevisto();
+    final previstoEsError = errorDescuento != null ||
+        previsto.contains('seña') ||
+        previsto.contains('Revisá');
     return AlertDialog(
-      title: const Text('Nuevo Pedido'),
-      content: _cargando
-          ? const SizedBox(
-              width: 280,
-              height: 120,
-              child: Center(child: CircularProgressIndicator()),
-            )
-          : SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (_clientes.isEmpty)
-                    const Text(
-                      'No hay clientes cargados. Crea un cliente en la pantalla Clientes para asociarle el pedido.',
-                    )
-                  else
-                    DropdownButton<int>(
-                      isExpanded: true,
-                      value: _clienteId,
-                      items: _clientes
-                          .map(
-                            (cliente) => DropdownMenuItem(
-                              value: cliente.id,
-                              child: Text(cliente.nombre),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (valor) => setState(() => _clienteId = valor),
-                    ),
-                  const SizedBox(height: 12),
-                  if (_productos.isNotEmpty)
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(
-                          value: false,
-                          label: Text('Existente'),
-                        ),
-                        ButtonSegment(
-                          value: true,
-                          label: Text('Nuevo'),
-                        ),
-                      ],
-                      selected: {_modoNuevo},
-                      onSelectionChanged: (seleccion) {
-                        setState(() => _modoNuevo = seleccion.first);
-                      },
-                    ),
-                  if (_productos.isEmpty)
-                    Text(
-                      'No hay productos. Carga nombre y precio de venta para crear uno.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  const SizedBox(height: 8),
-                  if (!_modoNuevo && _productos.isNotEmpty)
-                    DropdownButton<int>(
-                      isExpanded: true,
-                      value: _productoId,
-                      items: _productos
-                          .map(
-                            (producto) => DropdownMenuItem(
-                              value: producto.id,
-                              child: Text(
-                                '${producto.nombre} · ${_usd(producto.precioVenta)}',
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (valor) => setState(() => _productoId = valor),
-                    ),
-                  if (_modoNuevo) ...[
-                    TextField(
-                      controller: _nombreCtrl,
-                      decoration: const InputDecoration(labelText: 'Producto'),
-                    ),
-                    TextField(
-                      controller: _precioCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Precio de venta (USD)',
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                    ),
-                  ],
-                  Row(
-                    children: [
-                      SizedBox(
-                        width: 80,
-                        child: TextField(
-                          controller: _cantidadCtrl,
-                          decoration: const InputDecoration(labelText: 'Cant.'),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed:
-                            _modoNuevo ? _agregarNuevo : _agregarExistente,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Agregar'),
-                      ),
-                    ],
-                  ),
-                  ..._lineas.map(
-                    (linea) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      title: Text('${linea.nombre} x${linea.cantidad}'),
-                      subtitle: Text(
-                        '${_usd(linea.precioVenta)} c/u · ${_usd(linea.precioVenta * linea.cantidad)}',
-                      ),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _quitar(linea),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Monto total: ${_usd(_total)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    'La seña se muestra aparte y no se resta del total.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  CheckboxListTile(
-                    value: _pagoCompleto,
-                    onChanged: (valor) {
-                      setState(() {
-                        _pagoCompleto = valor ?? false;
-                        _sincronizarSena();
-                      });
-                    },
-                    title: const Text('Pago completo'),
-                    controlAffinity: ListTileControlAffinity.leading,
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  if (!_pagoCompleto)
-                    TextField(
-                      controller: _senaCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Seña / anticipo (USD)',
-                      ),
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                    ),
-                  if (_pagoCompleto)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text('Seña: ${_usd(_total)}'),
-                    ),
-                  if (_error != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
+      title: Text(
+        widget.ventaDirecta ? 'Venta directa' : 'Nuevo pedido',
+        style: const TextStyle(color: AppColors.texto, fontWeight: FontWeight.w800),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.clientes.isNotEmpty)
+              DropdownButton<int>(
+                isExpanded: true,
+                value: _clienteId,
+                items: [
+                  for (final cliente in widget.clientes)
+                    DropdownMenuItem(
+                      value: cliente.id,
                       child: Text(
-                        _error!,
-                        style: const TextStyle(color: Colors.red),
+                        cliente.nombre,
+                        style: const TextStyle(color: AppColors.texto),
                       ),
                     ),
                 ],
+                onChanged: (valor) => setState(() => _clienteId = valor),
+              ),
+            TextField(
+              controller: _nombreClienteCtrl,
+              style: const TextStyle(color: AppColors.texto),
+              decoration: InputDecoration(
+                labelText: widget.clientes.isEmpty
+                    ? 'Nombre del cliente'
+                    : 'O escribí otro nombre',
+              ),
+              onChanged: (_) => setState(() => _error = null),
+            ),
+            if (widget.clientes.isNotEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  'Si escribís un nombre, se usa ese y no el de la lista.',
+                  style: TextStyle(color: AppColors.textoSuave, fontSize: 12),
+                ),
+              ),
+            const SizedBox(height: 12),
+            if (widget.productos.isNotEmpty)
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(value: false, label: Text('Existente')),
+                  ButtonSegment(value: true, label: Text('Nuevo')),
+                ],
+                selected: {_modoNuevo},
+                onSelectionChanged: (seleccion) {
+                  setState(() {
+                    _modoNuevo = seleccion.first;
+                    _variante = '';
+                    _unidad = '';
+                    if (_modoNuevo) {
+                      _precioCtrl.clear();
+                    } else {
+                      _aplicarPrecioDeProducto();
+                    }
+                  });
+                },
+              ),
+            if (widget.productos.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'No hay productos cargados. Escribí nombre, cantidad y precio.',
+                  style: TextStyle(color: AppColors.textoSuave),
+                ),
+              ),
+            const SizedBox(height: 8),
+            if (!_modoNuevo && widget.productos.isNotEmpty)
+              DropdownButton<int>(
+                isExpanded: true,
+                value: _productoId,
+                items: [
+                  for (final producto in widget.productos)
+                    DropdownMenuItem(
+                      value: producto.id,
+                      child: Text(
+                        producto.nombre,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: AppColors.texto),
+                      ),
+                    ),
+                ],
+                onChanged: (valor) {
+                  setState(() {
+                    _productoId = valor;
+                    _variante = '';
+                    _unidad = '';
+                    _aplicarPrecioDeProducto();
+                  });
+                },
+              ),
+            if (!_modoNuevo && _pideVariante) _selectorVariante(),
+            if (!_modoNuevo && _pideUnidad) _selectorUnidad(),
+            if (_modoNuevo || widget.productos.isEmpty)
+              TextField(
+                controller: _nombreCtrl,
+                style: const TextStyle(color: AppColors.texto),
+                decoration: const InputDecoration(labelText: 'Producto'),
+              ),
+            TextField(
+              controller: _precioCtrl,
+              style: const TextStyle(color: AppColors.texto),
+              decoration: const InputDecoration(labelText: 'Precio (USD)'),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+            ),
+            Row(
+              children: [
+                if (_modoNuevo || !_pideUnidad) ...[
+                  SizedBox(
+                    width: 88,
+                    child: TextField(
+                      controller: _cantidadCtrl,
+                      style: const TextStyle(color: AppColors.texto),
+                      decoration: const InputDecoration(labelText: 'Cant.'),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const Spacer(),
+                ] else
+                  const Expanded(
+                    child: Text(
+                      'Esta unidad se vende de a una.',
+                      style: TextStyle(color: AppColors.textoSuave, fontSize: 12),
+                    ),
+                  ),
+                TextButton.icon(
+                  onPressed: _agregar,
+                  icon: const Icon(Icons.add, color: AppColors.primario),
+                  label: const Text('Agregar'),
+                ),
+              ],
+            ),
+            for (var i = 0; i < _lineas.length; i++)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(
+                  _lineas[i].titulo,
+                  style: const TextStyle(color: AppColors.texto),
+                ),
+                subtitle: Text(
+                  '${_usd(_lineas[i].precio)} c/u · ${_usd(_lineas[i].subtotal)}',
+                  style: const TextStyle(color: AppColors.textoSuave),
+                ),
+                trailing: IconButton(
+                  icon:
+                      const Icon(Icons.delete_outline, color: AppColors.alerta),
+                  onPressed: () => _quitar(i),
+                ),
+              ),
+            const SizedBox(height: 8),
+            const Text(
+              'Descuento',
+              style: TextStyle(color: AppColors.texto, fontWeight: FontWeight.w800),
+            ),
+            const Text(
+              'Baja el total de esta venta. El precio del producto queda igual.',
+              style: TextStyle(color: AppColors.textoSuave, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'monto', label: Text('Monto')),
+                ButtonSegment(value: 'porcentaje', label: Text('%')),
+              ],
+              selected: {_descuentoModo},
+              onSelectionChanged: (seleccion) {
+                setState(() {
+                  _descuentoModo = seleccion.first;
+                  _error = null;
+                });
+                _syncSena();
+              },
+            ),
+            TextField(
+              controller: _descuentoCtrl,
+              style: const TextStyle(color: AppColors.texto),
+              decoration: InputDecoration(
+                labelText: _descuentoModo == 'porcentaje'
+                    ? 'Porcentaje'
+                    : 'Descuento (USD)',
+              ),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+            ),
+            if (_descuentoMonto > 0.009) ...[
+              Text(
+                'Subtotal ${_usd(_bruto)}',
+                style: const TextStyle(color: AppColors.textoSuave),
+              ),
+              Text(
+                _descuentoModo == 'porcentaje'
+                    ? 'Descuento ${_descuentoCtrl.text.trim()}% · ${_usd(_descuentoMonto)}'
+                    : 'Descuento ${_usd(_descuentoMonto)}',
+                style: const TextStyle(color: AppColors.texto),
+              ),
+            ],
+            Text(
+              'Total ${_usd(_total)}',
+              style: const TextStyle(
+                color: AppColors.texto,
+                fontWeight: FontWeight.w800,
               ),
             ),
+            const Text(
+              'La seña se muestra aparte y no se resta del total.',
+              style: TextStyle(color: AppColors.textoSuave, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Medio de pago',
+              style: TextStyle(color: AppColors.texto, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final medio in MetaPedido.medios)
+                  ChoiceChip(
+                    label: Text(MetaPedido.etiquetaMedio(medio)),
+                    selected: _medioPago == medio,
+                    onSelected: (activo) => setState(() {
+                      _medioPago = activo ? medio : '';
+                    }),
+                  ),
+              ],
+            ),
+            CheckboxListTile(
+              value: _fiado,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              activeColor: AppColors.primario,
+              title: const Text(
+                'Fiado',
+                style: TextStyle(color: AppColors.texto),
+              ),
+              subtitle: const Text(
+                'La seña puede quedar en 0. El saldo se anota para cobrar, sin duplicar la deuda.',
+                style: TextStyle(color: AppColors.textoSuave, fontSize: 12),
+              ),
+              onChanged: (valor) {
+                setState(() {
+                  _fiado = valor ?? false;
+                  if (_fiado && _pagoCompleto) {
+                    _pagoCompleto = false;
+                    _senaCtrl.text = '';
+                  }
+                  if (!_fiado) _diaCobro = null;
+                  _error = null;
+                });
+              },
+            ),
+            if (_fiado)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _elegirDiaCobro,
+                  icon: const Icon(Icons.event_outlined),
+                  label: Text(
+                    _diaCobro == null
+                        ? 'Día de cobro'
+                        : 'Cobrar el ${_diaCobro!.day}/${_diaCobro!.month}/${_diaCobro!.year}',
+                  ),
+                ),
+              ),
+            CheckboxListTile(
+              value: _pagoCompleto,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              activeColor: AppColors.primario,
+              title: const Text(
+                'Pago completo',
+                style: TextStyle(color: AppColors.texto),
+              ),
+              onChanged: (valor) {
+                setState(() {
+                  _pagoCompleto = valor ?? false;
+                  if (_pagoCompleto) _fiado = false;
+                });
+                _syncSena();
+              },
+            ),
+            if (!_pagoCompleto)
+              TextField(
+                controller: _senaCtrl,
+                style: const TextStyle(color: AppColors.texto),
+                decoration: const InputDecoration(labelText: 'Seña (USD)'),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Seña ${_usd(_total)}',
+                  style: const TextStyle(color: AppColors.texto),
+                ),
+              ),
+            const SizedBox(height: 8),
+            Text(
+              previstoEsError ? previsto : 'Va a quedar como: $previsto',
+              style: TextStyle(
+                color:
+                    previstoEsError ? AppColors.alerta : AppColors.textoSuave,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: AppColors.alerta),
+                ),
+              ),
+          ],
+        ),
+      ),
       actions: [
         TextButton(
-          onPressed: _guardando ? null : () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context),
           child: const Text('Cancelar'),
         ),
         ElevatedButton(
-          onPressed: _guardando || _cargando || _clientes.isEmpty
-              ? null
-              : () {
-                  _guardar();
-                },
-          child: const Text('Guardar'),
+          style: _botonEstadio,
+          onPressed: _guardar,
+          child: Text(widget.ventaDirecta ? 'Guardar venta' : 'Guardar'),
         ),
       ],
     );
   }
 }
 
-class _PedidoDbDetalleDialog extends StatefulWidget {
-  final PedidoRepository repo;
-  final PedidoResumen pedidoInicial;
-  final Future<void> Function() onActualizado;
-
-  const _PedidoDbDetalleDialog({
-    required this.repo,
-    required this.pedidoInicial,
-    required this.onActualizado,
+class _DetalleDialog extends StatefulWidget {
+  const _DetalleDialog({
+    required this.pedido,
+    required this.conStock,
+    required this.onCambiar,
+    required this.onPagar,
   });
 
+  final _PedidoVista pedido;
+  final bool conStock;
+  final Future<_PedidoVista> Function(PedidoEstado destino) onCambiar;
+  final Future<_PedidoVista> Function(double pago) onPagar;
+
   @override
-  State<_PedidoDbDetalleDialog> createState() => _PedidoDbDetalleDialogState();
+  State<_DetalleDialog> createState() => _DetalleDialogState();
 }
 
-class _PedidoDbDetalleDialogState extends State<_PedidoDbDetalleDialog> {
-  late PedidoResumen _pedido = widget.pedidoInicial;
+class _DetalleDialogState extends State<_DetalleDialog> {
+  late _PedidoVista _pedido = widget.pedido;
+  MetaPedido? _meta;
   bool _ocupado = false;
   String? _error;
 
-  List<String> _opcionesEstado(String actual) {
-    if (EstadosPedido.valores.contains(actual)) return EstadosPedido.valores;
-    return [actual, ...EstadosPedido.valores];
+  @override
+  void initState() {
+    super.initState();
+    _leerComprobante();
   }
 
-  Future<void> _cambiar(String? nuevo) async {
-    if (nuevo == null || nuevo == _pedido.estado || _ocupado) return;
-    if (!EstadosPedido.esValido(nuevo)) return;
+  Future<void> _leerComprobante() async {
+    final doc = await const AmpliacionLocal().cargar();
+    if (!mounted) return;
+    setState(() => _meta = doc.pedidos[_pedido.id]);
+  }
+
+  bool get _cerrado {
+    final estado = PedidoEstados.leer(_pedido.estado);
+    return estado == PedidoEstado.entregado || estado == PedidoEstado.cancelado;
+  }
+
+  Future<void> _adjuntar() async {
+    if (_ocupado || _cerrado) return;
+    try {
+      final archivo = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 900,
+        imageQuality: 45,
+      );
+      if (archivo == null) return;
+      final texto = base64Encode(await archivo.readAsBytes());
+      final meta = await const AmpliacionLocal().guardarComprobante(
+        pedidoId: _pedido.id,
+        base64: texto,
+        estado: 'pendiente',
+      );
+      if (!mounted) return;
+      setState(() => _meta = meta);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = _mensajeDe(error));
+    }
+  }
+
+  Future<void> _resolverComprobante(String estado) async {
+    final actual = _meta;
+    if (actual == null || actual.comprobante.isEmpty || _ocupado) return;
     setState(() {
       _ocupado = true;
       _error = null;
     });
     try {
-      await widget.repo.cambiarEstado(_pedido.id, nuevo);
-      final actualizado = await widget.repo.obtenerPedido(_pedido.id);
-      if (!mounted) {
-        await widget.onActualizado();
-        return;
+      final meta = await const AmpliacionLocal().guardarComprobante(
+        pedidoId: _pedido.id,
+        base64: actual.comprobante,
+        estado: estado,
+      );
+      if (!mounted) return;
+      setState(() => _meta = meta);
+      if (estado == 'aceptado' &&
+          PedidoEstados.puedePasar(_pedido.estado, PedidoEstado.pagado)) {
+        final nuevo = await widget.onCambiar(PedidoEstado.pagado);
+        if (!mounted) return;
+        setState(() => _pedido = nuevo);
       }
-      if (actualizado == null) {
-        Navigator.pop(context);
-        await widget.onActualizado();
-        return;
-      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = _mensajeDe(error));
+    } finally {
+      if (mounted) setState(() => _ocupado = false);
+    }
+  }
+
+  Future<void> _elegir(PedidoEstado destino) async {
+    if (_ocupado) return;
+    if (destino == PedidoEstado.cancelado) {
+      final confirma = await _preguntarCancelar(context);
+      if (!confirma || !mounted) return;
+    }
+    setState(() {
+      _ocupado = true;
+      _error = null;
+    });
+    try {
+      final nuevo = await widget.onCambiar(destino);
+      if (!mounted) return;
       setState(() {
-        _pedido = actualizado;
+        _pedido = nuevo;
         _ocupado = false;
       });
-    } catch (_) {
+      if (destino == PedidoEstado.cancelado && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Quedó cancelado. El historial se conserva.'),
+          ),
+        );
+      }
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         _ocupado = false;
-        _error = 'No se pudo cambiar el estado.';
+        _error = _mensajeDe(error);
       });
-      return;
     }
-    await widget.onActualizado();
   }
 
-  Future<void> _eliminar() async {
-    final confirmar = await showDialog<bool>(
+  Future<void> _cobrar() async {
+    if (_ocupado) return;
+    final resta = _pedido.total - _pedido.montoSenado;
+    final campo = TextEditingController();
+    final pago = await showDialog<double>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Eliminar pedido'),
-        content: const Text('¿Seguro que deseas eliminar este pedido?'),
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Registrar pago'),
+        content: TextField(
+          controller: campo,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Monto',
+            helperText: 'Resta ${_usd(resta)}. No puede superarlo.',
+          ),
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancelar'),
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Eliminar'),
+          FilledButton(
+            onPressed: () {
+              final texto = campo.text.trim().replaceAll(',', '.');
+              final valor = double.tryParse(texto);
+              Navigator.pop(dialogContext, valor);
+            },
+            child: const Text('Guardar'),
           ),
         ],
       ),
     );
-    if (confirmar != true || !mounted) return;
-    setState(() => _ocupado = true);
+    campo.dispose();
+    if (pago == null || !mounted) return;
+    if (pago <= 0 || pago - resta > 0.009) {
+      setState(() => _error = 'Ingresá un pago mayor a cero y hasta lo que resta.');
+      return;
+    }
+    setState(() {
+      _ocupado = true;
+      _error = null;
+    });
     try {
-      await widget.repo.eliminarPedido(_pedido.id);
+      final nuevo = await widget.onPagar(pago);
       if (!mounted) return;
-      Navigator.pop(context);
-      await widget.onActualizado();
-    } catch (_) {
+      setState(() {
+        _pedido = nuevo;
+        _ocupado = false;
+      });
+    } catch (error) {
       if (!mounted) return;
       setState(() {
         _ocupado = false;
-        _error = 'No se pudo eliminar el pedido.';
+        _error = _mensajeDe(error);
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final opciones = PedidoEstados.siguientesDe(_pedido.estado);
+    final resta = _pedido.total - _pedido.montoSenado;
+    final avisaStock =
+        widget.conStock && opciones.any((estado) => estado.reservaStock);
     return AlertDialog(
-      title: const Text('Detalle de Pedido'),
+      title: const Text(
+        'Detalle del pedido',
+        style: TextStyle(color: AppColors.texto, fontWeight: FontWeight.w800),
+      ),
       content: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Cliente: ${_pedido.clienteNombre}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('Fecha: ${_fechaCorta(_pedido.fecha)}'),
-            const SizedBox(height: 8),
-            _EstadoDbChip(estado: _pedido.estado),
-            const SizedBox(height: 8),
-            Text(
-              'Monto total: ${_usd(_pedido.montoTotal)}',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            Text('Seña: ${_usd(_pedido.montoSenado)}'),
-            const SizedBox(height: 12),
-            DropdownButton<String>(
-              isExpanded: true,
-              value: _pedido.estado,
-              items: _opcionesEstado(_pedido.estado)
-                  .map(
-                    (estado) => DropdownMenuItem(
-                      value: estado,
-                      child: Text(EstadosPedido.etiqueta(estado)),
-                    ),
-                  )
-                  .toList(),
-              onChanged: _ocupado ? null : (valor) => _cambiar(valor),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Productos:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            if (_pedido.items.isEmpty) const Text('Sin productos'),
-            ..._pedido.items.map(
-              (item) => Text(
-                '${item.nombre} x${item.cantidad} · ${_usd(item.precioVenta)} c/u · ${_usd(item.subtotal)}',
+              _pedido.clienteNombre,
+              style: const TextStyle(
+                color: AppColors.texto,
+                fontWeight: FontWeight.w800,
               ),
             ),
+            const SizedBox(height: 4),
+            Text(
+              _fechaCorta(_pedido.fecha),
+              style: const TextStyle(color: AppColors.textoSuave),
+            ),
+            const SizedBox(height: 8),
+            _EstadoChip(estado: _pedido.estado),
+            const SizedBox(height: 8),
+            if (_pedido.descuentoMonto > 0.009) ...[
+              Text(
+                'Subtotal ${_usd(_pedido.subtotal)}',
+                style: const TextStyle(color: AppColors.textoSuave),
+              ),
+              Text(
+                _etiquetaDescuento(_pedido),
+                style: const TextStyle(color: AppColors.texto),
+              ),
+            ],
+            Text(
+              'Total ${_usd(_pedido.total)}',
+              style: const TextStyle(
+                color: AppColors.texto,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (_pedido.medioPago.isNotEmpty)
+              Text(
+                'Medio de pago: ${MetaPedido.etiquetaMedio(_pedido.medioPago)}',
+                style: const TextStyle(color: AppColors.texto),
+              ),
+            Text(
+              'Seña ${_usd(_pedido.montoSenado)}',
+              style: const TextStyle(color: AppColors.texto),
+            ),
+            if (_pedido.fiado)
+              Text(
+                resta > 0.009
+                    ? 'Quedó fiada. El saldo se anota para cobrar.'
+                    : 'Quedó fiada.',
+                style: const TextStyle(
+                  color: AppColors.texto,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            if (resta > 0.009) ...[
+              Text(
+                'Resta ${_usd(resta)}',
+                style: const TextStyle(color: AppColors.textoSuave),
+              ),
+              if (PedidoEstados.leer(_pedido.estado) != PedidoEstado.cancelado)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: _ocupado ? null : _cobrar,
+                    child: const Text('Registrar pago'),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 12),
+            const Text(
+              'Comprobante',
+              style: TextStyle(color: AppColors.texto, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            if (_meta != null && _meta!.comprobante.isNotEmpty) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(
+                  base64Decode(_meta!.comprobante),
+                  height: 120,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stack) => const Text(
+                    'No se pudo mostrar la imagen.',
+                    style: TextStyle(color: AppColors.alerta),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _meta!.comprobanteEstado.isEmpty
+                    ? 'Pendiente de revisión'
+                    : 'Estado: ${_meta!.comprobanteEstado}',
+                style: const TextStyle(color: AppColors.textoSuave),
+              ),
+              if (!_cerrado && _meta!.comprobanteEstado != 'aceptado')
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: _ocupado ? null : () => _resolverComprobante('aceptado'),
+                      child: const Text('Aceptar'),
+                    ),
+                    TextButton(
+                      onPressed: _ocupado ? null : () => _resolverComprobante('rechazado'),
+                      child: const Text('Rechazar'),
+                    ),
+                  ],
+                ),
+            ],
+            if (!_cerrado)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _ocupado ? null : _adjuntar,
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Adjuntar comprobante'),
+                ),
+              ),
+            const SizedBox(height: 12),
+            if (opciones.isEmpty)
+              const Text(
+                'Este pedido no tiene más acciones.',
+                style: TextStyle(color: AppColors.textoSuave),
+              )
+            else
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final destino in opciones)
+                    ActionChip(
+                      label: Text(destino.accion),
+                      onPressed: _ocupado ? null : () => _elegir(destino),
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: colorPedidoEstado(destino.texto)
+                          .withValues(alpha: 0.14),
+                      side: BorderSide(
+                        color: colorPedidoEstado(destino.texto)
+                            .withValues(alpha: 0.45),
+                      ),
+                      labelStyle: TextStyle(
+                        color: colorPedidoEstado(destino.texto),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                ],
+              ),
+            if (avisaStock) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Al confirmar o entregar se descuenta stock de lo que controla stock: primero el de Yo y, si no alcanza, el de Nildo. Si hay una unidad, pasa a vendida. Si hay una variante, se descuenta esa variante. Un servicio que no controla stock no descuenta ni pide unidades. Si falta stock de lo que sí controla, el estado no cambia.',
+                style: TextStyle(color: AppColors.textoSuave, height: 1.3),
+              ),
+            ],
             const SizedBox(height: 16),
             const Text(
-              'Historial de estados',
-              style: TextStyle(fontWeight: FontWeight.bold),
+              'Productos',
+              style: TextStyle(
+                  color: AppColors.texto, fontWeight: FontWeight.w800),
+            ),
+            if (_pedido.productos.isEmpty)
+              const Text(
+                'Sin productos',
+                style: TextStyle(color: AppColors.textoSuave),
+              ),
+            for (final producto in _pedido.productos)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${producto.nombre} x${producto.cantidad} · ${_usd(producto.precio)} c/u · ${_usd(producto.subtotal)}',
+                  style: const TextStyle(color: AppColors.texto),
+                ),
+              ),
+            const SizedBox(height: 16),
+            const Text(
+              'Historial',
+              style: TextStyle(
+                  color: AppColors.texto, fontWeight: FontWeight.w800),
             ),
             if (_pedido.historial.isEmpty)
-              const Text('Sin cambios de estado.')
-            else
-              ..._pedido.historial.map(
-                (cambio) => Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    '${_fechaHora(cambio.fechaCambio)}: ${EstadosPedido.etiqueta(cambio.estadoAnterior)} → ${EstadosPedido.etiqueta(cambio.estadoNuevo)}',
-                  ),
+              const Text(
+                'Sin cambios de estado.',
+                style: TextStyle(color: AppColors.textoSuave),
+              ),
+            for (final cambio in _pedido.historial)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${_fechaHora(cambio.fecha)}: ${PedidoEstados.etiqueta(cambio.anterior)} → ${PedidoEstados.etiqueta(cambio.nuevo)}',
+                  style: const TextStyle(color: AppColors.textoSuave),
                 ),
               ),
             if (_error != null)
@@ -1447,18 +2196,13 @@ class _PedidoDbDetalleDialogState extends State<_PedidoDbDetalleDialog> {
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   _error!,
-                  style: const TextStyle(color: Colors.red),
+                  style: const TextStyle(color: AppColors.alerta),
                 ),
               ),
           ],
         ),
       ),
       actions: [
-        if (_pedido.estado == EstadosPedido.pendiente)
-          TextButton(
-            onPressed: _ocupado ? null : () => _eliminar(),
-            child: const Text('Eliminar', style: TextStyle(color: Colors.red)),
-          ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cerrar'),
@@ -1466,4 +2210,86 @@ class _PedidoDbDetalleDialogState extends State<_PedidoDbDetalleDialog> {
       ],
     );
   }
+}
+
+final ButtonStyle _botonEstadio = ElevatedButton.styleFrom(
+  backgroundColor: AppColors.primario,
+  foregroundColor: Colors.white,
+  elevation: 0,
+  shape: const StadiumBorder(),
+  textStyle: const TextStyle(fontWeight: FontWeight.w700),
+);
+
+Future<bool> _preguntarCancelar(BuildContext context) async {
+  final resultado = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      title: const Text(
+        'Cancelar pedido',
+        style: TextStyle(color: AppColors.texto, fontWeight: FontWeight.w800),
+      ),
+      content: const Text(
+        '¿Cancelás este pedido? Queda marcado como cancelado y el historial se conserva.',
+        style: TextStyle(color: AppColors.texto),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(dialogContext, false),
+          child: const Text('Volver'),
+        ),
+        ElevatedButton(
+          style: _botonEstadio,
+          onPressed: () => Navigator.pop(dialogContext, true),
+          child: const Text('Sí, cancelar'),
+        ),
+      ],
+    ),
+  );
+  return resultado == true;
+}
+
+double? _parseMonto(String raw) {
+  final texto = raw.trim().replaceAll(',', '.');
+  if (texto.isEmpty) return null;
+  return double.tryParse(texto);
+}
+
+String _fechaCorta(DateTime fecha) =>
+    '${fecha.day}/${fecha.month}/${fecha.year}';
+
+String _fechaHora(DateTime fecha) {
+  final hora = fecha.hour.toString().padLeft(2, '0');
+  final minuto = fecha.minute.toString().padLeft(2, '0');
+  return '${_fechaCorta(fecha)} $hora:$minuto';
+}
+
+String _nombreConDetalle(String nombre, LineaMeta linea) {
+  final extras = <String>[
+    if (linea.variante.isNotEmpty) linea.variante,
+    if (linea.unidad.isNotEmpty) linea.unidad,
+  ];
+  if (extras.isEmpty) return nombre;
+  return '$nombre · ${extras.join(' · ')}';
+}
+
+String _usd(double valor) => 'USD ${valor.toStringAsFixed(2)}';
+
+String _etiquetaDescuento(_PedidoVista pedido) {
+  if (pedido.descuentoTipo == 'porcentaje' && pedido.descuentoValor > 0) {
+    final pct = pedido.descuentoValor;
+    final texto = pct == pct.roundToDouble()
+        ? pct.toStringAsFixed(0)
+        : pct.toStringAsFixed(2);
+    return 'Descuento $texto% (${_usd(pedido.descuentoMonto)})';
+  }
+  return 'Descuento ${_usd(pedido.descuentoMonto)}';
+}
+
+String _mensajeDe(Object error) {
+  if (error is StateError && error.message.isNotEmpty) return error.message;
+  if (error is ArgumentError) {
+    final mensaje = error.message;
+    if (mensaje is String && mensaje.isNotEmpty) return mensaje;
+  }
+  return 'No se pudo completar la acción.';
 }
