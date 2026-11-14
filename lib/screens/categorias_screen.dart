@@ -49,30 +49,13 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
   }
 
   Future<void> _pedirNombre({String? actual, required void Function(String) alGuardar}) async {
-    final campo = TextEditingController(text: actual ?? '');
     final nombre = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(actual == null ? 'Nueva categoría' : 'Renombrar'),
-        content: TextField(
-          controller: campo,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(labelText: 'Nombre'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, campo.text.trim()),
-            child: const Text('Guardar'),
-          ),
-        ],
+      builder: (context) => _NombreCategoriaDialog(
+        titulo: actual == null ? 'Nueva categoría' : 'Renombrar',
+        inicial: actual ?? '',
       ),
     );
-    campo.dispose();
     if (nombre == null || nombre.isEmpty || !mounted) return;
     final repetida = _categorias.any(
       (item) => item.toLowerCase() == nombre.toLowerCase() && item != actual,
@@ -250,6 +233,49 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
                 ],
               ),
       ),
+    );
+  }
+}
+
+class _NombreCategoriaDialog extends StatefulWidget {
+  const _NombreCategoriaDialog({required this.titulo, required this.inicial});
+
+  final String titulo;
+  final String inicial;
+
+  @override
+  State<_NombreCategoriaDialog> createState() => _NombreCategoriaDialogState();
+}
+
+class _NombreCategoriaDialogState extends State<_NombreCategoriaDialog> {
+  late final TextEditingController _campo = TextEditingController(text: widget.inicial);
+
+  @override
+  void dispose() {
+    _campo.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.titulo),
+      content: TextField(
+        controller: _campo,
+        autofocus: true,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(labelText: 'Nombre'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _campo.text.trim()),
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

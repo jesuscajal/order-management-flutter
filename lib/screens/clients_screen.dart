@@ -9,9 +9,33 @@ import '../data/capital_repository.dart';
 import '../data/pedido_repository.dart';
 import '../data/daos/cliente_dao.dart';
 import '../models/pedido_estado.dart';
+import '../data/paises_latam.dart';
+import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 
 enum FiltroClientes { todos, activos, potenciales }
+
+InputDecoration _decoracionTelefono(
+  PaisLatam? pais, {
+  String etiqueta = 'Teléfono',
+}) {
+  if (pais == null) {
+    return InputDecoration(
+      labelText: etiqueta,
+      prefixIcon: const Icon(Icons.phone),
+      helperText:
+          'Elegí la nacionalidad en Cambiar de moneda para ver la característica.',
+    );
+  }
+  return InputDecoration(
+    labelText: etiqueta,
+    prefixIcon: const Icon(Icons.phone),
+    prefixText: '${pais.prefijo} ',
+    hintText: pais.ejemplo,
+    helperText: '${pais.nombre}: ${pais.prefijo} ${pais.ejemplo}',
+  );
+}
 
 class ClientsScreen extends StatefulWidget {
   final AppDatabase database;
@@ -33,12 +57,27 @@ class _ClientsScreenState extends State<ClientsScreen> {
   Map<String, double>? _saldosPorNombre;
   Map<String, String> _comprasPorNombre = {};
   bool _saldoNoDisponible = false;
+  String _codigoMoneda = monedaPorDefecto;
+  PaisLatam? _pais;
 
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     _clienteDao = ClienteDao(widget.database);
     _cargarClientes();
+  }
+
+  Future<void> _leerMoneda() async {
+    final negocio = await NegocioStore().leer();
+    final codigo = NegocioLocal.normalizarMoneda(negocio?.moneda);
+    final pais = paisPorCodigo(negocio?.pais);
+    if (!mounted) return;
+    if (codigo == _codigoMoneda && pais?.codigo == _pais?.codigo) return;
+    setState(() {
+      _codigoMoneda = codigo;
+      _pais = pais;
+    });
   }
 
   Future<void> _cargarClientes() async {
@@ -108,7 +147,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
       color = AppColors.textoSuave;
     } else {
       final saldo = _saldosPorNombre?[nombre.trim().toLowerCase()] ?? 0;
-      texto = 'Saldo a cobrar: ${CapitalRepository.textoMonto(saldo)} USDT';
+      texto = 'Saldo a cobrar: ${formatearMoneda(saldo, _codigoMoneda)}';
       color = saldo > 0 ? AppColors.alerta : AppColors.verde;
     }
     return Padding(
@@ -193,7 +232,10 @@ class _ClientsScreenState extends State<ClientsScreen> {
         controllerNombre.text = contactoSeleccionado.displayName;
 
         if (contactoSeleccionado.phones.isNotEmpty) {
-          controllerContacto.text = contactoSeleccionado.phones.first.number;
+          controllerContacto.text = telefonoLocal(
+            contactoSeleccionado.phones.first.number,
+            _pais,
+          );
         }
 
         if (contactoSeleccionado.emails.isNotEmpty) {
@@ -261,10 +303,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                     Expanded(
                       child: TextField(
                         controller: controllerContacto,
-                        decoration: const InputDecoration(
-                          labelText: 'Teléfono',
-                          prefixIcon: Icon(Icons.phone),
-                        ),
+                        decoration: _decoracionTelefono(_pais),
                         keyboardType: TextInputType.phone,
                       ),
                     ),
@@ -337,7 +376,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
         await _clienteDao.insertCliente(
           ClientesCompanion.insert(
             nombre: controllerNombre.text,
-            contacto: Value(controllerContacto.text),
+            contacto: Value(telefonoConPrefijo(controllerContacto.text, _pais)),
             email: controllerEmail.text.isEmpty
                 ? const Value.absent()
                 : Value(controllerEmail.text),
@@ -363,7 +402,9 @@ class _ClientsScreenState extends State<ClientsScreen> {
 
   Future<void> _mostrarDialogoEditar(models.Cliente cliente) async {
     final nombreCtrl = TextEditingController(text: cliente.nombre);
-    final contactoCtrl = TextEditingController(text: cliente.contacto);
+    final contactoCtrl = TextEditingController(
+      text: telefonoLocal(cliente.contacto, _pais),
+    );
     final emailCtrl = TextEditingController(text: cliente.email ?? '');
     final notasCtrl = TextEditingController(text: cliente.notas ?? '');
     final result = await showDialog<bool>(
@@ -380,7 +421,8 @@ class _ClientsScreenState extends State<ClientsScreen> {
               ),
               TextField(
                 controller: contactoCtrl,
-                decoration: const InputDecoration(labelText: 'Contacto'),
+                decoration: _decoracionTelefono(_pais, etiqueta: 'Teléfono'),
+                keyboardType: TextInputType.phone,
               ),
               TextField(
                 controller: emailCtrl,
@@ -407,7 +449,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
       ),
     );
     final nombre = nombreCtrl.text.trim();
-    final contacto = contactoCtrl.text.trim();
+    final contacto = telefonoConPrefijo(contactoCtrl.text, _pais);
     final email = emailCtrl.text.trim();
     final notas = notasCtrl.text.trim();
     nombreCtrl.dispose();

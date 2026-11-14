@@ -151,7 +151,7 @@ Map<String, dynamic> _leerCuerpo(http.Response response) {
 void _lanzarSiErrorHttp(int status, Map<String, dynamic> body) {
   if (status == 401) {
     throw ChatIaException(
-      'La clave de OpenAI no es válida. Actualizala desde el ícono de la llave.',
+      'La clave de OpenAI no es válida.',
     );
   }
   if (status == 429) {

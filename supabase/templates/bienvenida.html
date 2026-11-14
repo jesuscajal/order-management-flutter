@@ -1,0 +1,106 @@
+<!--
+  Plantilla de bienvenida = correo «Confirm signup» de Supabase Auth.
+  Quedó en el repo. No se aplicó en el proyecto remoto: el conector de
+  Supabase no edita plantillas de Authentication y en esta máquina no hay
+  Supabase CLI ni token de management. No pegues claves en este archivo.
+
+  Cómo aplicarla
+  1. Abrí el proyecto cuya URL pública es
+     https://qjdpsdyxqmvkhgqofyuu.supabase.co
+  2. Authentication → Emails → Templates → Confirm signup.
+     Atajo: https://supabase.com/dashboard/project/qjdpsdyxqmvkhgqofyuu/auth/templates
+  3. Asunto: Tu cuenta de Gexi ya está creada
+  4. Reemplazá el cuerpo por el HTML desde <!DOCTYPE html> (podés dejar
+     este comentario: el cliente de correo no lo muestra).
+     No borres la variable de Go del botón ni la del enlace de respaldo:
+     es el enlace de confirmación que Auth completa al enviar.
+  5. Guardá.
+  6. Authentication → URL Configuration: Site URL = https://gexi.com.ar
+     para que ese enlace vuelva a la app.
+  7. Authentication → Sign In / Up → Email: «Confirm email» encendido.
+     Si está apagado, Auth no envía este correo.
+
+  Cómo se dispara
+  Al crear la cuenta con correo y contraseña, la app llama
+  SesionRemota.entrarOCrear → auth.signUp. Supabase Auth manda esta
+  plantilla. No hace falta otro servidor de correo.
+  El alta con Google no dispara este mensaje: el proveedor ya verificó el correo.
+
+  Logo
+  https://gexi.com.ar/icons/Icon-512.png
+  Es web/icons/Icon-512.png, ya publicado en el sitio (HTTP 200, image/png).
+  El original del repo está en assets/branding/logo_gexi.png y no tiene URL propia.
+  Si el icono deja de responder, cambiá el src del <img> por la URL pública del logo.
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>Tu cuenta de Gexi ya está creada</title>
+</head>
+<body style="margin:0;padding:0;background-color:#F5FBFA;">
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">
+    Tu cuenta de Gexi ya está creada. Entrá a la app o publicá tu tienda.
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5FBFA;margin:0;padding:0;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#ffffff;border-radius:16px;border:1px solid #d7ebe4;">
+          <tr>
+            <td style="height:6px;border-radius:16px 16px 0 0;background-color:#1A56F0;background-image:linear-gradient(90deg,#16C96A,#1A56F0);font-size:0;line-height:0;">&nbsp;</td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:32px 32px 8px 32px;">
+              <img src="https://gexi.com.ar/icons/Icon-512.png" width="168" height="168" alt="Gexi" style="display:block;width:168px;height:auto;border:0;outline:none;text-decoration:none;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 32px 0 32px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#0E3154;">
+              <h1 style="margin:0 0 12px 0;font-size:24px;line-height:1.3;font-weight:700;color:#0E3154;">Tu cuenta ya está creada</h1>
+              <p style="margin:0 0 16px 0;font-size:16px;line-height:1.5;color:#0E3154;">
+                Hola. Creamos tu cuenta de Gexi con este correo. Confirmalo para usarla y entrá con el mismo correo y la contraseña que elegiste al registrarte.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 32px 8px 32px;">
+              <table role="presentation" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" bgcolor="#1A56F0" style="border-radius:999px;background-color:#1A56F0;background-image:linear-gradient(90deg,#16C96A,#1A56F0);">
+                    <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 28px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;line-height:1;color:#ffffff;text-decoration:none;border-radius:999px;">Confirmar y entrar</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px 8px 32px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#0E3154;">
+              <p style="margin:0 0 8px 0;font-size:15px;line-height:1.5;font-weight:700;color:#0E3154;">Cómo seguir</p>
+              <p style="margin:0 0 8px 0;font-size:15px;line-height:1.5;color:#0E3154;">
+                <strong>App.</strong> Abrí <a href="https://gexi.com.ar" style="color:#1A56F0;text-decoration:none;">https://gexi.com.ar</a> e ingresá con este correo.
+              </p>
+              <p style="margin:0 0 16px 0;font-size:15px;line-height:1.5;color:#0E3154;">
+                <strong>Tienda.</strong> Cuando la publiques, queda en <a href="https://gexi.com.ar" style="color:#1A56F0;text-decoration:none;">https://gexi.com.ar/</a> seguida de la dirección que elijas. Por ejemplo, https://gexi.com.ar/mi-negocio.
+              </p>
+              <p style="margin:0;font-size:13px;line-height:1.5;color:#3d5c73;">
+                Si el botón no abre, copiá este enlace en el navegador:<br>
+                <a href="{{ .ConfirmationURL }}" style="color:#1A56F0;word-break:break-all;">{{ .ConfirmationURL }}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 32px 28px 32px;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+              <p style="margin:0;font-size:13px;line-height:1.5;color:#3d5c73;">
+                Gexi · Gestión inteligente para crecer<br>
+                <a href="https://gexi.com.ar" style="color:#1A56F0;text-decoration:none;">gexi.com.ar</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

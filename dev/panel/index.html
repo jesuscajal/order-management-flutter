@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel del desarrollador</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: light;
+      --fondo: #f5fbfa;
+      --texto: #0e3154;
+      --suave: #6b7280;
+      --linea: #e4e8ee;
+      --primario: #1a56f0;
+      --lima: #16c96a;
+      --lima-suave: #e7fbf6;
+      --ambar: #ca8a04;
+      --alerta: #dc2626;
+      --marino: #08345c;
+      --teal: #14b8a6;
+      --tarjeta: #ffffff;
+      --sombra: 0 8px 16px rgba(15, 58, 90, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+      color: var(--texto);
+      background:
+        linear-gradient(180deg, #e7fbf6 0, rgba(231, 251, 246, 0) 220px),
+        var(--fondo);
+    }
+
+    main {
+      width: min(1080px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 56px;
+    }
+
+    .cabecera {
+      position: relative;
+      overflow: hidden;
+      padding: 22px 24px 20px;
+      border-radius: 18px;
+      background: var(--tarjeta);
+      box-shadow: var(--sombra);
+    }
+
+    .cabecera::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #3dde6e, var(--primario));
+    }
+
+    .marca {
+      margin: 0 0 8px;
+      font-size: 0.95rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(90deg, #16a34a, var(--primario));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.55rem;
+      letter-spacing: -0.03em;
+    }
+
+    .bajada, .ayuda {
+      margin: 0;
+      color: var(--suave);
+      line-height: 1.45;
+    }
+
+    .tarjeta {
+      margin-top: 16px;
+      padding: 20px;
+      background: var(--tarjeta);
+      border-radius: 18px;
+      box-shadow: var(--sombra);
+    }
+
+    button, input { font: inherit; }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      background: var(--primario);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:disabled { opacity: 0.6; cursor: wait; }
+
+    button.secundario {
+      margin-top: 8px;
+      background: var(--lima-suave);
+      color: var(--primario);
+    }
+
+    button.texto {
+      background: transparent;
+      color: var(--suave);
+      padding-inline: 0;
+    }
+
+    button.texto:hover { color: var(--alerta); }
+
+    #sin-acceso button.texto { color: var(--alerta); }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 100%;
+      margin-bottom: 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--linea);
+      border-radius: 16px;
+      color: var(--texto);
+      background: #fff;
+    }
+
+    .fila {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .aviso {
+      min-height: 1.3em;
+      margin: 12px 0 0;
+      font-weight: 600;
+    }
+
+    .aviso.error { color: var(--alerta); }
+
+    .numeros {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .numero {
+      position: relative;
+      padding: 16px 16px 16px 18px;
+      overflow: hidden;
+      border-radius: 18px;
+      background: var(--tarjeta);
+      color: var(--texto);
+      box-shadow: var(--sombra);
+    }
+
+    .numero::before {
+      content: "";
+      position: absolute;
+      top: 14px;
+      bottom: 14px;
+      left: 0;
+      width: 4px;
+      border-radius: 0 4px 4px 0;
+    }
+
+    .numero span {
+      display: block;
+      color: var(--suave);
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    .numero strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 1.65rem;
+      letter-spacing: -0.04em;
+    }
+
+    .numero.azul::before { background: var(--primario); }
+    .numero.lima::before { background: var(--lima); }
+    .numero.ambar::before { background: var(--ambar); }
+    .numero.violeta::before { background: var(--teal); }
+
+    .correo { margin: 4px 0 0; color: var(--suave); }
+
+    #sin-acceso h2 {
+      margin: 0;
+      color: var(--alerta);
+      font-size: 1.3rem;
+    }
+
+    .bloque {
+      margin-top: 16px;
+      padding: 20px;
+      border-radius: 18px;
+      background: var(--tarjeta);
+      box-shadow: var(--sombra);
+    }
+
+    h2 {
+      margin: 0 0 4px;
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+    }
+
+    .calle {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 14px;
+      margin-top: 14px;
+      padding: 18px 14px 12px;
+      border-radius: 18px;
+      background:
+        linear-gradient(#e7fbf6 0 70%, #d7efe4 70% 84%, #cfe6da 84%);
+    }
+
+    .tiendita {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .tiendita .toldo,
+    .pin-local .toldo {
+      height: 14px;
+      border-radius: 8px 8px 0 0;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--toldo) 0 12px,
+        color-mix(in srgb, var(--toldo) 72%, white) 12px 20px
+      );
+      box-shadow: 0 3px 0 color-mix(in srgb, var(--toldo) 48%, black);
+    }
+
+    .tiendita .fachada {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      padding: 8px 10px 12px;
+      border: 2px solid var(--marino);
+      border-top: 0;
+      border-radius: 0 0 16px 16px;
+      background: #fffdf8;
+    }
+
+    .tiendita .cartel {
+      margin: 0 0 8px;
+      font-size: 0.95rem;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .tiendita .vidriera,
+    .pin-local .vidriera {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border: 2px solid var(--marino);
+      border-top: 0;
+      background: #e7fbf6;
+      color: var(--marino);
+      font-weight: 800;
+    }
+
+    .tiendita .vidriera {
+      height: 78px;
+      border-top: 2px solid var(--marino);
+      border-radius: 12px;
+      font-size: 1.6rem;
+    }
+
+    .tiendita .vidriera img,
+    .pin-local .vidriera img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .tiendita .datos {
+      display: grid;
+      gap: 2px;
+      margin-top: 8px;
+      color: var(--suave);
+      font-size: 0.75rem;
+      text-align: center;
+    }
+
+    .tiendita .lugar.si { color: #0f9f58; font-weight: 700; }
+    .tiendita .lugar.no { color: #b7791f; font-weight: 700; }
+
+    .marco-mapa {
+      margin-top: 16px;
+      padding: 8px;
+      border: 1px solid var(--linea);
+      border-radius: 18px;
+      background: var(--lima-suave);
+    }
+
+    #mapa {
+      height: 460px;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #d7e3ea;
+    }
+
+    #mapa.vacio { height: 280px; }
+
+    .marca-tienda {
+      background: transparent !important;
+      border: 0 !important;
+    }
+
+    .pin-local {
+      width: 76px;
+      text-align: center;
+    }
+
+    .pin-local .vidriera {
+      height: 42px;
+      font-size: 1rem;
+    }
+
+    .pin-local .rotulo {
+      margin-top: 3px;
+      padding: 2px 6px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--marino);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chats {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .chat {
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--linea);
+      background: var(--lima-suave);
+    }
+
+    .chat .meta {
+      margin: 0 0 8px;
+      color: var(--suave);
+      font-size: 0.85rem;
+    }
+
+    .chat p {
+      margin: 0 0 8px;
+      white-space: pre-wrap;
+      line-height: 1.4;
+    }
+
+    .chat p:last-child { margin-bottom: 0; }
+
+    .tabla-wrap {
+      margin-top: 12px;
+      overflow-x: auto;
+      border-radius: 16px;
+      border: 1px solid var(--linea);
+    }
+
+    .tabla {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+
+    .tabla th,
+    .tabla td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--linea);
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    .tabla th {
+      background: var(--lima-suave);
+      color: var(--marino);
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+    }
+
+    .tabla tr:last-child td { border-bottom: 0; }
+    .tabla tbody tr:nth-child(even) { background: #f7fdfb; }
+    .tabla .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .tabla .total { color: var(--primario); font-weight: 800; }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 0.95rem;
+    }
+
+    .fuente { margin: 10px 0 0; font-weight: 700; }
+
+    .rejilla-ia {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .check {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin: 4px 0 12px;
+      font-weight: 600;
+    }
+
+    .check input { width: auto; margin: 0; }
+
+    .ia-lista {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .ia-item {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      border: 1px solid var(--linea);
+      border-radius: 16px;
+    }
+
+    .ia-item.activa {
+      border-color: #b7f0d4;
+      background: var(--lima-suave);
+    }
+
+    .ia-item p { margin: 0; }
+
+    .ia-item .detalle {
+      color: var(--suave);
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .pill {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--lima);
+      color: var(--marino);
+      font-size: 0.72rem;
+      font-weight: 800;
+    }
+
+    .acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    button.chico { padding: 8px 14px; }
+
+    button.peligro {
+      background: transparent;
+      color: var(--alerta);
+    }
+
+    .quien {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .quien .muestra,
+    .quien img {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 28px;
+      border-radius: 8px 8px 6px 6px;
+      border-top: 5px solid var(--toldo, var(--primario));
+      object-fit: cover;
+      background: #e7fbf6;
+      color: var(--marino);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+    }
+
+    @media (max-width: 800px) {
+      .numeros { grid-template-columns: 1fr 1fr; }
+      .rejilla-ia { grid-template-columns: 1fr; }
+      .cabecera { align-items: flex-start; flex-direction: column; }
+      #mapa { height: 340px; }
+    }
+  </style>
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+</head>
+<body>
+  <main>
+    <header class="cabecera">
+      <div>
+        <p class="marca">Gexi</p>
+        <h1>Panel del desarrollador</h1>
+        <p class="bajada">Los microemprendimientos, el mapa, la IA y el consumo del asistente.</p>
+      </div>
+    </header>
+
+    <p id="cargando" class="tarjeta">Revisando la sesión…</p>
+
+    <section id="ingreso" class="tarjeta" hidden>
+      <p class="bajada">Entrá con Google, con la misma cuenta de la app. La página tiene que ser localhost, no 127.0.0.1.</p>
+      <button type="button" id="entrar">Entrar con Google</button>
+      <p id="aviso-ingreso" class="aviso" role="status"></p>
+    </section>
+
+    <section id="sin-acceso" hidden>
+      <div class="tarjeta">
+        <h2>No tenés acceso</h2>
+        <p id="correo-rechazado" class="correo"></p>
+        <p class="ayuda">Esta cuenta no está en la lista del desarrollador.</p>
+        <button type="button" class="texto" id="salir-rechazado">Cerrar sesión</button>
+      </div>
+    </section>
+
+    <section id="resumen" hidden>
+      <div class="fila" style="margin-top: 14px">
+        <p id="correo-ok" class="correo"></p>
+        <button type="button" class="texto" id="salir">Cerrar sesión</button>
+      </div>
+      <div class="numeros">
+        <article class="numero azul"><span>Tiendas activas</span><strong id="tiendas">—</strong></article>
+        <article class="numero lima"><span>Usuarios de la app</span><strong id="usuarios">—</strong></article>
+        <article class="numero ambar"><span>Tokens consumidos</span><strong id="tokens">—</strong></article>
+        <article class="numero violeta"><span>Chats disponibles</span><strong id="chats">—</strong></article>
+      </div>
+
+      <section class="bloque" id="bloque-ia">
+        <h2>Configuración de IA</h2>
+        <p class="ayuda">Una sola fuente activa para el asistente y las fotos. Si no hay ninguna, se usa el secreto de la función. Después de guardar, la clave no se vuelve a mostrar.</p>
+        <p id="ia-fuente" class="fuente">Cargando la configuración…</p>
+        <p id="aviso-ia" class="aviso" role="status"></p>
+
+        <h3>Claves de API</h3>
+        <div id="ia-claves" class="ia-lista"></div>
+        <div class="rejilla-ia">
+          <div>
+            <label for="ia-clave-nombre">Nombre</label>
+            <input id="ia-clave-nombre" type="text" maxlength="40" autocomplete="off" placeholder="Por ejemplo, Cuenta principal">
+          </div>
+          <div>
+            <label for="ia-clave-valor">Clave</label>
+            <input id="ia-clave-valor" type="password" maxlength="400" autocomplete="new-password" placeholder="Se guarda y no se vuelve a mostrar">
+          </div>
+        </div>
+        <label class="check" for="ia-clave-activar">
+          <input id="ia-clave-activar" type="checkbox" checked>
+          Dejarla como la fuente activa
+        </label>
+        <button type="button" id="ia-agregar-clave">Agregar clave</button>
+
+        <h3>Modelo local</h3>
+        <p class="ayuda">Dirección compatible con OpenAI, por ejemplo http://192.168.0.10:11434/v1. La clave es opcional.</p>
+        <div class="rejilla-ia">
+          <div>
+            <label for="ia-local-url">Dirección</label>
+            <input id="ia-local-url" type="url" maxlength="300" autocomplete="off" placeholder="http://127.0.0.1:11434/v1">
+          </div>
+          <div>
+            <label for="ia-local-modelo">Modelo</label>
+            <input id="ia-local-modelo" type="text" maxlength="120" autocomplete="off" placeholder="llama3.1">
+          </div>
+        </div>
+        <label for="ia-local-clave">Clave del modelo</label>
+        <input id="ia-local-clave" type="password" maxlength="400" autocomplete="new-password" placeholder="Opcional">
+        <label class="check" for="ia-local-activar">
+          <input id="ia-local-activar" type="checkbox">
+          Usar este modelo como fuente activa
+        </label>
+        <div class="acciones">
+          <button type="button" id="ia-guardar-local">Guardar modelo</button>
+          <button type="button" class="secundario chico" id="ia-quitar-clave-local" hidden>Quitar la clave del modelo</button>
+          <button type="button" class="peligro chico" id="ia-quitar-local" hidden>Quitar modelo</button>
+        </div>
+        <button type="button" class="texto" id="ia-usar-secreto" hidden>Usar el secreto de la función</button>
+      </section>
+
+      <section class="bloque">
+        <h2>Las tienditas</h2>
+        <p class="ayuda">Una por microemprendimiento, con su color y su logo. Si eligió un lugar, también aparece en el mapa.</p>
+        <div id="calle" class="calle"></div>
+        <div class="marco-mapa">
+          <div id="mapa"></div>
+        </div>
+        <p id="aviso-mapa" class="ayuda"></p>
+        <div id="lista-sin-lugar"></div>
+      </section>
+
+      <section class="bloque">
+        <h2>Tokens por microemprendimiento</h2>
+        <p class="ayuda">El total es entrada más salida. La caché es la parte de la entrada que el modelo reutilizó. Chats es lo que queda del cupo de 30.</p>
+        <div class="tabla-wrap">
+          <table class="tabla">
+            <thead>
+              <tr>
+                <th>Tienda</th>
+                <th class="num">Consultas</th>
+                <th class="num">Entrada</th>
+                <th class="num">Salida</th>
+                <th class="num">Caché</th>
+                <th class="num">Total</th>
+                <th class="num">Chats</th>
+              </tr>
+            </thead>
+            <tbody id="lista-tokens"></tbody>
+          </table>
+        </div>
+        <p id="aviso-tokens" class="ayuda"></p>
+      </section>
+
+      <p id="aviso-asistente" class="ayuda" hidden style="margin-top: 16px">Todavía no hay datos del asistente</p>
+      <p id="aviso-resumen" class="aviso error" role="status"></p>
+      <button type="button" class="secundario" id="actualizar">Actualizar</button>
+
+      <section class="bloque">
+        <h2>Desde dónde usan la app</h2>
+        <p class="ayuda">Ciudad de la conexión, por cuenta. No es un punto exacto ni la dirección del local.</p>
+        <div id="lista-accesos" class="chats"></div>
+        <p id="aviso-accesos" class="ayuda"></p>
+      </section>
+
+      <section class="bloque">
+        <h2>Consumo de la clave</h2>
+        <p class="ayuda">Cada fila es un envío de la app: la tienda, desde dónde salió, el modelo y los tokens. No se muestra el texto.</p>
+        <div class="tabla-wrap">
+          <table class="tabla">
+            <thead>
+              <tr>
+                <th>Cuándo</th>
+                <th>Tienda</th>
+                <th>Origen</th>
+                <th>Modelo</th>
+                <th class="num">Entrada</th>
+                <th class="num">Salida</th>
+                <th class="num">Total</th>
+              </tr>
+            </thead>
+            <tbody id="lista-consumo"></tbody>
+          </table>
+        </div>
+        <p id="aviso-consumo" class="ayuda"></p>
+      </section>
+    </section>
+  </main>
+
+  <!-- El servidor completa el JSON de abajo al responder. No pongas claves acá. -->
+  <script id="gexi-panel-config" type="application/json">GEXI_PANEL_JSON</script>
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script type="module" src="/panel.js"></script>
+</body>
+</html>

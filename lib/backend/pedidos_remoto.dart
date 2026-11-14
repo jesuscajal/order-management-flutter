@@ -119,10 +119,13 @@ class PedidosRemoto {
       final cambios = <String, dynamic>{};
       final origenRemoto = _origenRemoto(origen);
       final medio = _medioRemoto(medio: medioPago, fiado: fiado);
-      if (origenRemoto != null) cambios['origen'] = origenRemoto;
+      if (origenRemoto != null) {
+        cambios['origen'] = origenRemoto;
+        cambios['categoria'] = _categoriaRemota(origenRemoto);
+      }
       if (medio != null) cambios['medio_pago'] = medio;
       if (cambios.isEmpty) return;
-      await supabase.from('pedidos').update(cambios).eq('id', id);
+      await _actualizarFila(supabase, id, cambios);
     } catch (error) {
       RemotoComun.aviso('No se pudo actualizar el medio del pedido: $error');
     }
@@ -284,13 +287,18 @@ Future<void> _insertarPedido(
   final origen = _origenRemoto(datos.origen);
   final medio = _medioRemoto(medio: datos.medioPago, fiado: false);
   final nota = datos.nota?.trim();
-  if (origen != null) fila['origen'] = origen;
+  if (origen != null) {
+    fila['origen'] = origen;
+    fila['categoria'] = _categoriaRemota(origen);
+  }
   if (medio != null) fila['medio_pago'] = medio;
   if (nota != null && nota.isNotEmpty) fila['nota'] = nota;
+  final actor = supabase.auth.currentUser?.email?.trim() ?? '';
+  if (actor.isNotEmpty) fila['usuario_email'] = actor;
   final clienteUuid = await _clienteUuid(datos.clienteLocalId);
   if (clienteUuid != null) fila['cliente_id'] = clienteUuid;
 
-  final creada = await supabase.from('pedidos').insert(fila).select('id').single();
+  final creada = await _insertarFila(supabase, fila);
   final id = creada['id'];
   if (id == null) return;
   await _MapaPedidos.guardar(negocioId, datos.pedidoLocalId, id);
@@ -358,12 +366,15 @@ Future<void> _actualizarPedido(
   final origen = _origenRemoto(datos.origen);
   final medio = _medioRemoto(medio: datos.medioPago, fiado: false);
   final nota = datos.nota?.trim();
-  if (origen != null) cambios['origen'] = origen;
+  if (origen != null) {
+    cambios['origen'] = origen;
+    cambios['categoria'] = _categoriaRemota(origen);
+  }
   if (medio != null) cambios['medio_pago'] = medio;
   if (nota != null && nota.isNotEmpty) cambios['nota'] = nota;
   final clienteUuid = await _clienteUuid(datos.clienteLocalId);
   if (clienteUuid != null) cambios['cliente_id'] = clienteUuid;
-  await supabase.from('pedidos').update(cambios).eq('id', pedidoId);
+  await _actualizarFila(supabase, pedidoId, cambios);
   if (!conHistorial) return;
   final anterior = datos.estadoAnterior?.trim().toLowerCase() ?? '';
   if (anterior.isEmpty || anterior == estado.toLowerCase()) return;
@@ -393,6 +404,62 @@ Future<String?> _unidadUuid(LineaPedidoRemota linea) async {
     IdsRemotos.unidad,
     IdsRemotos.claveUnidad(productoId, codigo),
   );
+}
+
+String _categoriaRemota(String origen) =>
+    origen == 'tienda' ? 'web' : 'manual';
+
+Future<Map<String, dynamic>> _insertarFila(
+  SupabaseClient supabase,
+  Map<String, dynamic> fila,
+) async {
+  try {
+    return await supabase.from('pedidos').insert(fila).select('id').single();
+  } catch (error) {
+    final texto = error.toString().toLowerCase();
+    final sinOpcionales = Map<String, dynamic>.from(fila);
+    var quito = false;
+    if (_columnaCategoriaAusente(error)) {
+      sinOpcionales.remove('categoria');
+      quito = true;
+    }
+    if (texto.contains('usuario_email')) {
+      sinOpcionales.remove('usuario_email');
+      quito = true;
+    }
+    if (!quito) rethrow;
+    return await supabase
+        .from('pedidos')
+        .insert(sinOpcionales)
+        .select('id')
+        .single();
+  }
+}
+
+Future<void> _actualizarFila(
+  SupabaseClient supabase,
+  Object pedidoId,
+  Map<String, dynamic> cambios,
+) async {
+  try {
+    await supabase.from('pedidos').update(cambios).eq('id', pedidoId);
+  } catch (error) {
+    if (!_columnaCategoriaAusente(error)) rethrow;
+    final sinCategoria = Map<String, dynamic>.from(cambios)..remove('categoria');
+    if (sinCategoria.isEmpty) return;
+    await supabase.from('pedidos').update(sinCategoria).eq('id', pedidoId);
+  }
+}
+
+bool _columnaCategoriaAusente(Object error) {
+  final texto = error.toString().toLowerCase();
+  if (!texto.contains('categoria')) return false;
+  return texto.contains('pgrst204') ||
+      texto.contains('42703') ||
+      texto.contains('schema cache') ||
+      texto.contains('does not exist') ||
+      texto.contains('no existe') ||
+      texto.contains('could not find');
 }
 
 String? _origenRemoto(String? origen) {
@@ -438,6 +505,10 @@ Future<void> _insertarHistorial(
 
 /// El id de Drift no entra en la tabla remota. Este mapa une los dos
 /// para que un cambio de estado actualice la misma fila.
+void olvidarMapaDePedidos() {
+  _MapaPedidos._memoria.clear();
+}
+
 class _MapaPedidos {
   static final Map<String, Object> _memoria = {};
 

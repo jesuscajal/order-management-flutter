@@ -3,6 +3,11 @@ import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/apariencia_tienda.dart';
+import '../data/diseno_tienda.dart';
+import '../data/funciones_asistente.dart';
+import '../data/paises_latam.dart';
+
 /// Rubro local. La detección no llama a ninguna API.
 class RubroDefinicion {
   const RubroDefinicion({
@@ -121,7 +126,6 @@ class CatalogoRubros {
       'roti',
       'panaderia',
       'heladeria',
-      'rotiseria',
       'cafeteria',
       'restaurante',
       'restaurant',
@@ -135,6 +139,57 @@ class CatalogoRubros {
     prefijos: ['gastro'],
   );
 
+  static const rotiseria = RubroDefinicion(
+    id: 'rotiseria',
+    nombre: 'Rotisería',
+    categorias: ['Minutas', 'Viandas', 'Bebidas'],
+    atributos: ['Tamaño', 'Variante', 'Guarnición'],
+    tipoTienda: 'Menú',
+    nota: 'Pensada para rotisería y minutas. La tienda se muestra como menú.',
+    palabras: ['rotiseria', 'vianda', 'minuta', 'guarnicion'],
+    prefijos: ['rotis'],
+  );
+
+  static const cosmeticos = RubroDefinicion(
+    id: 'cosmeticos',
+    nombre: 'Cosméticos',
+    categorias: ['Maquillaje', 'Cuidado de la piel', 'Cabello'],
+    atributos: ['Marca', 'Tono', 'Presentación'],
+    tipoTienda: 'Catálogo',
+    nota: 'Pensada para cosmética, con marca, tono y presentación.',
+    palabras: [
+      'cosmetico',
+      'maquillaje',
+      'labial',
+      'rimel',
+      'shampoo',
+      'skincare'
+    ],
+    prefijos: ['cosmet', 'maquill'],
+  );
+
+  static const servicios = RubroDefinicion(
+    id: 'servicios',
+    nombre: 'Servicios',
+    categorias: ['Servicios'],
+    atributos: ['Duración', 'Modalidad'],
+    tipoTienda: 'Catálogo',
+    nota: 'Pensada para turnos y servicios, con duración y modalidad.',
+    palabras: ['servicio', 'peluqueria', 'manicura', 'reparacion', 'taller'],
+    prefijos: ['servic'],
+  );
+
+  static const perfumes = RubroDefinicion(
+    id: 'perfumes',
+    nombre: 'Perfumes',
+    categorias: ['Perfumes', 'Sets'],
+    atributos: ['Marca', 'Concentración', 'Género'],
+    tipoTienda: 'Catálogo',
+    nota: 'Pensada para fragancias, con marca, concentración y género.',
+    palabras: ['perfume', 'fragancia', 'colonia'],
+    prefijos: ['perfum', 'fraganc'],
+  );
+
   static const general = RubroDefinicion(
     id: 'general',
     nombre: 'General',
@@ -144,8 +199,25 @@ class CatalogoRubros {
     nota: 'Una base simple, con productos, nombre y precio.',
   );
 
-  static const detectables = [tecnologia, indumentaria, gastronomia];
-  static const todos = [tecnologia, indumentaria, gastronomia, general];
+  static const detectables = [
+    tecnologia,
+    indumentaria,
+    gastronomia,
+    rotiseria,
+    cosmeticos,
+    servicios,
+    perfumes,
+  ];
+  static const todos = [
+    tecnologia,
+    indumentaria,
+    gastronomia,
+    rotiseria,
+    cosmeticos,
+    servicios,
+    perfumes,
+    general,
+  ];
 
   static List<RubroDefinicion> enOrden(Iterable<String> ids) {
     final pedidos = ids.toSet();
@@ -155,6 +227,10 @@ class CatalogoRubros {
     ];
   }
 }
+
+bool _esRubroMenu(RubroDefinicion rubro) =>
+    rubro.id == CatalogoRubros.gastronomia.id ||
+    rubro.id == CatalogoRubros.rotiseria.id;
 
 class PropuestaRubro {
   const PropuestaRubro({
@@ -200,20 +276,18 @@ class PropuestaRubro {
         rubros: [],
       );
     }
-    final soloGastronomia = elegidos.length == 1 &&
-        elegidos.single.id == CatalogoRubros.gastronomia.id;
-    final mezclaGastronomia = elegidos.length > 1 &&
-        elegidos.any((rubro) => rubro.id == CatalogoRubros.gastronomia.id);
+    final todosMenu = elegidos.every(_esRubroMenu);
+    final mezclaComida = !todosMenu && elegidos.any(_esRubroMenu);
     final nota = elegidos.length == 1
         ? elegidos.single.nota
-        : mezclaGastronomia
-            ? 'Mezclás gastronomía con otro rubro: la tienda queda como Catálogo y se conservan las categorías de ambos.'
+        : mezclaComida
+            ? 'Mezclás comida con otro rubro: la tienda queda como Catálogo y se conservan las categorías de ambos.'
             : 'Juntamos las categorías y los atributos de cada rubro, sin repetir.';
     return PropuestaRubro(
       plantilla: elegidos.map((rubro) => rubro.nombre).join(' + '),
       categorias: _unir(elegidos.map((rubro) => rubro.categorias)),
       atributos: _unir(elegidos.map((rubro) => rubro.atributos)),
-      tipoTienda: soloGastronomia ? 'Menú' : 'Catálogo',
+      tipoTienda: todosMenu ? 'Menú' : 'Catálogo',
       nota: nota,
       rubros: [for (final rubro in elegidos) rubro.nombre],
     );
@@ -295,7 +369,22 @@ class NegocioLocal {
     this.tiendaActiva = false,
     this.whatsapp = '',
     this.mensajePublico = '',
+    this.horario = '',
+    this.aliasCobro = '',
+    this.logoUrl = '',
+    this.asistenteListo,
+    this.facebookUrl = '',
+    this.instagramUrl = '',
+    this.mapsUrl = '',
+    this.latitud,
+    this.longitud,
     this.equipo = const [],
+    this.moneda = 'USD',
+    this.pais = '',
+    this.nacionalidad = '',
+    this.apariencia = const AparienciaTienda(),
+    this.diseno = const DisenoTienda(),
+    this.funciones = const FuncionesAsistente(),
   });
 
   final String nombre;
@@ -309,6 +398,24 @@ class NegocioLocal {
   final List<String> atributos;
   final String tipoTienda;
 
+  /// Código ISO 4217 en mayúsculas. USD si el negocio se guardó sin este campo.
+  final String moneda;
+
+  /// ISO 3166-1 alfa-2. Vacío si todavía no eligió nacionalidad.
+  final String pais;
+
+  /// Gentilicio guardado junto con el país, por ejemplo "argentina".
+  final String nacionalidad;
+
+  /// Colores, forma y textos de la vidriera. Solo valores predefinidos.
+  final AparienciaTienda apariencia;
+
+  /// Presentación según el rubro. Viaja en `apariencia.layout`.
+  final DisenoTienda diseno;
+
+  /// Lo que el asistente puede hacer. Viaja en `apariencia.funcionesAsistente`.
+  final FuncionesAsistente funciones;
+
   /// Email de la sesión que creó o confirmó el negocio. Vacío en JSON viejo.
   final String duenoEmail;
   final String slug;
@@ -316,10 +423,50 @@ class NegocioLocal {
   final String whatsapp;
   final String mensajePublico;
 
+  /// Horario de atención, en texto libre. La columna ya existe en `negocios`.
+  final String horario;
+
+  /// CBU, CVU o alias, en un solo texto. Vacío si el negocio no lo cargó.
+  final String aliasCobro;
+
+  /// Dirección pública del logo. Vacía si todavía no eligió uno.
+  final String logoUrl;
+
+  /// Enlace de Facebook de la página. Vacío si el negocio no lo cargó.
+  final String facebookUrl;
+
+  /// Enlace de Instagram de la página. Vacío si el negocio no lo cargó.
+  final String instagramUrl;
+
+  /// Enlace de Google Maps o dirección del local. Vacío si no se cargó.
+  final String mapsUrl;
+
+  /// Punto del local elegido en el buscador. Nulo si todavía no hay uno.
+  final double? latitud;
+  final double? longitud;
+
   /// Personas del negocio, además del dueño. Como máximo cinco.
   final List<MiembroEquipo> equipo;
 
+  /// Null en un negocio guardado antes del asistente: no se lo vuelve a mostrar.
+  /// False si la cuenta es nueva y todavía no lo terminó.
+  final bool? asistenteListo;
+
+  /// Cuenta nueva, o un alta que todavía no confirmó el rubro.
+  bool get necesitaAsistente {
+    if (asistenteListo == true) return false;
+    if (asistenteListo == false) return true;
+    return !configurado;
+  }
+
   static const cupoEquipo = 5;
+
+  /// Códigos de América Latina, más el euro por si un negocio ya lo tenía.
+  static final monedasAdmitidas = codigosMonedaLatam.toList();
+
+  /// Deja solo un código de [monedasAdmitidas]. Cualquier otro valor vuelve a USD.
+  static String normalizarMoneda(String? codigo) =>
+      normalizarMonedaLatam(codigo);
 
   MiembroEquipo? miembroConEmail(String email) {
     final clave = email.trim().toLowerCase();
@@ -340,6 +487,8 @@ class NegocioLocal {
   }
 
   NegocioLocal copiar({
+    String? nombre,
+    String? descripcion,
     String? rol,
     bool? configurado,
     String? plantilla,
@@ -352,11 +501,27 @@ class NegocioLocal {
     bool? tiendaActiva,
     String? whatsapp,
     String? mensajePublico,
+    String? horario,
+    String? aliasCobro,
+    String? logoUrl,
+    String? facebookUrl,
+    String? instagramUrl,
+    String? mapsUrl,
+    double? latitud,
+    double? longitud,
+    bool punto = false,
     List<MiembroEquipo>? equipo,
+    String? moneda,
+    String? pais,
+    String? nacionalidad,
+    AparienciaTienda? apariencia,
+    DisenoTienda? diseno,
+    FuncionesAsistente? funciones,
+    bool? asistenteListo,
   }) {
     return NegocioLocal(
-      nombre: nombre,
-      descripcion: descripcion,
+      nombre: nombre ?? this.nombre,
+      descripcion: descripcion ?? this.descripcion,
       codigo: codigo,
       rol: rol ?? this.rol,
       configurado: configurado ?? this.configurado,
@@ -370,7 +535,22 @@ class NegocioLocal {
       tiendaActiva: tiendaActiva ?? this.tiendaActiva,
       whatsapp: whatsapp ?? this.whatsapp,
       mensajePublico: mensajePublico ?? this.mensajePublico,
+      horario: horario ?? this.horario,
+      aliasCobro: aliasCobro ?? this.aliasCobro,
+      logoUrl: logoUrl ?? this.logoUrl,
+      facebookUrl: facebookUrl ?? this.facebookUrl,
+      instagramUrl: instagramUrl ?? this.instagramUrl,
+      mapsUrl: mapsUrl ?? this.mapsUrl,
+      latitud: punto ? latitud : this.latitud,
+      longitud: punto ? longitud : this.longitud,
       equipo: equipo ?? this.equipo,
+      moneda: moneda == null ? this.moneda : normalizarMoneda(moneda),
+      pais: pais ?? this.pais,
+      nacionalidad: nacionalidad ?? this.nacionalidad,
+      apariencia: apariencia ?? this.apariencia,
+      diseno: diseno ?? this.diseno,
+      funciones: funciones ?? this.funciones,
+      asistenteListo: asistenteListo ?? this.asistenteListo,
     );
   }
 
@@ -390,7 +570,27 @@ class NegocioLocal {
         'tiendaActiva': tiendaActiva,
         'whatsapp': whatsapp,
         'mensajePublico': mensajePublico,
+        'horario': horario,
+        'aliasCobro': aliasCobro,
+        'logoUrl': logoUrl,
+        if (asistenteListo != null) 'asistenteListo': asistenteListo,
+        'facebookUrl': facebookUrl,
+        'instagramUrl': instagramUrl,
+        'mapsUrl': mapsUrl,
+        if (latitud != null) 'latitud': latitud,
+        if (longitud != null) 'longitud': longitud,
         'equipo': [for (final miembro in equipo) miembro.toJson()],
+        'moneda': normalizarMoneda(moneda),
+        'pais': pais.trim().toUpperCase(),
+        'nacionalidad': nacionalidad.trim(),
+        'apariencia': aparienciaConDiseno(),
+      };
+
+  /// `apariencia` de siempre, más el diseño y las funciones del asistente.
+  Map<String, dynamic> aparienciaConDiseno() => {
+        ...apariencia.toJson(),
+        'layout': diseno.toJson(),
+        FuncionesAsistente.clave: funciones.toJson(),
       };
 
   factory NegocioLocal.fromJson(Map<String, dynamic> json) {
@@ -416,12 +616,42 @@ class NegocioLocal {
       tiendaActiva: json['tiendaActiva'] as bool? ?? false,
       whatsapp: json['whatsapp'] as String? ?? '',
       mensajePublico: json['mensajePublico'] as String? ?? '',
+      horario: json['horario'] as String? ?? '',
+      aliasCobro: json['aliasCobro'] as String? ?? '',
+      logoUrl: json['logoUrl'] as String? ?? '',
+      asistenteListo: json.containsKey('asistenteListo')
+          ? json['asistenteListo'] == true
+          : null,
+      facebookUrl: json['facebookUrl'] as String? ?? '',
+      instagramUrl: json['instagramUrl'] as String? ?? '',
+      mapsUrl: json['mapsUrl'] as String? ?? '',
+      latitud: _coord(json['latitud']),
+      longitud: _coord(json['longitud']),
       equipo: [
         for (final item in (json['equipo'] as List<dynamic>? ?? const []))
           if (item is Map)
             MiembroEquipo.fromJson(Map<String, dynamic>.from(item)),
       ].where((miembro) => miembro.nombre.isNotEmpty).take(cupoEquipo).toList(),
+      moneda: normalizarMoneda(json['moneda']?.toString()),
+      pais: (json['pais'] as String? ?? '').trim().toUpperCase(),
+      nacionalidad: (json['nacionalidad'] as String? ?? '').trim(),
+      apariencia: AparienciaTienda.desde(json['apariencia']),
+      diseno: DisenoTienda.desdeApariencia(
+        json['apariencia'],
+        rubros: _rubrosLeidos(json),
+      ),
+      funciones: FuncionesAsistente.desde(json['apariencia']),
     );
+  }
+}
+
+/// Moneda del negocio guardado en este dispositivo.
+Future<String> monedaDelNegocio() async {
+  try {
+    final negocio = await NegocioStore().leer();
+    return NegocioLocal.normalizarMoneda(negocio?.moneda);
+  } catch (_) {
+    return NegocioLocal.normalizarMoneda(null);
   }
 }
 
@@ -435,6 +665,9 @@ class NegocioStore {
   /// Categorías de la tabla `categorias`, además del arreglo del negocio.
   static Future<void> Function(List<String> categorias)? alGuardarCatalogo;
 
+  /// Deja el negocio en el teléfono sin volver a publicarlo.
+  Future<void> guardarLocal(NegocioLocal negocio) => _guardar(negocio);
+
   Future<NegocioLocal?> leer() async {
     final prefs = await SharedPreferences.getInstance();
     final crudo = prefs.getString(_clave);
@@ -447,6 +680,19 @@ class NegocioStore {
       return negocio;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// El JSON ya trae `moneda`. Si no, el negocio es anterior a este campo.
+  Future<bool> tieneMonedaGuardada() async {
+    final prefs = await SharedPreferences.getInstance();
+    final crudo = prefs.getString(_clave);
+    if (crudo == null || crudo.isEmpty) return false;
+    try {
+      final decoded = jsonDecode(crudo);
+      return decoded is Map && decoded.containsKey('moneda');
+    } catch (_) {
+      return false;
     }
   }
 
@@ -474,15 +720,31 @@ class NegocioStore {
       categorias: propuesta.categorias,
       atributos: propuesta.atributos,
       tipoTienda: propuesta.tipoTienda,
+      diseno: DisenoTienda.desdeRubros(propuesta.rubros),
     );
     await _guardar(listo);
     return listo;
+  }
+
+  Future<bool> tienePaisGuardado() async {
+    final prefs = await SharedPreferences.getInstance();
+    final crudo = prefs.getString(_clave);
+    if (crudo == null || crudo.isEmpty) return false;
+    try {
+      final decoded = jsonDecode(crudo);
+      return decoded is Map && decoded.containsKey('pais');
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<NegocioLocal> crear({
     required String nombre,
     required String descripcion,
     required String duenoEmail,
+    String moneda = 'USD',
+    String pais = '',
+    String nacionalidad = '',
   }) async {
     final negocio = NegocioLocal(
       nombre: nombre.trim(),
@@ -496,6 +758,10 @@ class NegocioStore {
       atributos: const [],
       tipoTienda: 'Catálogo',
       duenoEmail: duenoEmail.trim(),
+      moneda: NegocioLocal.normalizarMoneda(moneda),
+      pais: pais.trim().toUpperCase(),
+      nacionalidad: nacionalidad.trim(),
+      asistenteListo: false,
     );
     await _guardar(negocio);
     await _publicar(negocio);
@@ -564,7 +830,8 @@ class NegocioStore {
     final actual = await leer();
     if (actual == null) return null;
     if (equipo.length > NegocioLocal.cupoEquipo) {
-      throw StateError('El equipo admite hasta ${NegocioLocal.cupoEquipo} personas.');
+      throw StateError(
+          'El equipo admite hasta ${NegocioLocal.cupoEquipo} personas.');
     }
     final limpio = <MiembroEquipo>[];
     final vistos = <String>{};
@@ -594,12 +861,66 @@ class NegocioStore {
     return actualizado;
   }
 
+  /// Nombre, oficio, país y moneda. No toca la página ni el equipo.
+  Future<NegocioLocal?> guardarFicha({
+    required String nombre,
+    required String descripcion,
+    required String moneda,
+    required String pais,
+    required String nacionalidad,
+  }) async {
+    final actual = await leer();
+    if (actual == null) return null;
+    final actualizado = actual.copiar(
+      nombre: nombre.trim(),
+      descripcion: descripcion.trim(),
+      moneda: moneda,
+      pais: pais.trim().toUpperCase(),
+      nacionalidad: nacionalidad.trim(),
+    );
+    await _guardar(actualizado);
+    await _publicar(actualizado);
+    return actualizado;
+  }
+
+  /// WhatsApp del negocio, con característica. No publica ni oculta la página.
+  Future<NegocioLocal?> guardarWhatsapp(String whatsapp) async {
+    final actual = await leer();
+    if (actual == null) return null;
+    final actualizado = actual.copiar(whatsapp: whatsapp.trim());
+    await _guardar(actualizado);
+    await _publicar(actualizado);
+    return actualizado;
+  }
+
+  /// Horario de atención. Si se cierra el asistente, la cuenta no lo vuelve a ver.
+  Future<NegocioLocal?> guardarHorario(
+    String horario, {
+    bool cerrarAsistente = false,
+  }) async {
+    final actual = await leer();
+    if (actual == null) return null;
+    final actualizado = actual.copiar(
+      horario: horario.trim(),
+      asistenteListo: cerrarAsistente ? true : actual.asistenteListo,
+    );
+    await _guardar(actualizado);
+    await _publicar(actualizado);
+    return actualizado;
+  }
+
   /// Actualiza únicamente la configuración de la página del negocio existente.
   Future<NegocioLocal?> guardarPagina({
     required String slug,
     required bool tiendaActiva,
     required String whatsapp,
     required String mensajePublico,
+    required String aliasCobro,
+    required String facebookUrl,
+    required String instagramUrl,
+    required String mapsUrl,
+    double? latitud,
+    double? longitud,
   }) async {
     final actual = await leer();
     if (actual == null) return null;
@@ -608,7 +929,66 @@ class NegocioStore {
       tiendaActiva: tiendaActiva,
       whatsapp: whatsapp,
       mensajePublico: mensajePublico,
+      aliasCobro: aliasCobro.trim(),
+      facebookUrl: facebookUrl.trim(),
+      instagramUrl: instagramUrl.trim(),
+      mapsUrl: mapsUrl.trim(),
+      latitud: latitud,
+      longitud: longitud,
+      punto: true,
     );
+    await _guardar(actualizado);
+    await _publicar(actualizado);
+    return actualizado;
+  }
+
+  /// Guarda la dirección del logo en el teléfono y la vuelve a publicar.
+  Future<NegocioLocal?> guardarLogo(String logoUrl) async {
+    final actual = await leer();
+    if (actual == null) return null;
+    final actualizado = actual.copiar(logoUrl: logoUrl.trim());
+    await _guardar(actualizado);
+    await _publicar(actualizado);
+    return actualizado;
+  }
+
+  /// Guarda la presentación. Al publicarse, el servidor deja una versión
+  /// si `apariencia.layout` cambió.
+  Future<NegocioLocal?> guardarDiseno(DisenoTienda diseno) async {
+    diseno.validar();
+    final actual = await leer();
+    if (actual == null) return null;
+    final actualizado = actual.copiar(diseno: diseno);
+    await _guardar(actualizado);
+    await _publicar(actualizado);
+    return actualizado;
+  }
+
+  /// Guarda qué funciones puede usar el asistente. Viajan en `apariencia`.
+  Future<NegocioLocal?> guardarFunciones(FuncionesAsistente funciones) async {
+    final actual = await leer();
+    if (actual == null) return null;
+    final actualizado = actual.copiar(funciones: funciones);
+    await _guardar(actualizado);
+    await _publicar(actualizado);
+    return actualizado;
+  }
+
+  /// Lee las funciones guardadas. Si no hay negocio, quedan prendidas.
+  Future<FuncionesAsistente> leerFuncionesAsistente() async {
+    try {
+      final negocio = await leer();
+      return negocio?.funciones ?? const FuncionesAsistente();
+    } catch (_) {
+      return const FuncionesAsistente();
+    }
+  }
+
+  /// Guarda colores y forma de la vidriera en el teléfono y en Supabase.
+  Future<NegocioLocal?> guardarApariencia(AparienciaTienda apariencia) async {
+    final actual = await leer();
+    if (actual == null) return null;
+    final actualizado = actual.copiar(apariencia: apariencia);
     await _guardar(actualizado);
     await _publicar(actualizado);
     return actualizado;
@@ -618,15 +998,32 @@ class NegocioStore {
     NegocioLocal negocio,
     PropuestaRubro propuesta, {
     required String duenoEmail,
+    AparienciaTienda? apariencia,
+    DisenoTienda? diseno,
+    List<String>? atributos,
+    bool? asistenteListo,
   }) async {
+    final disenoInicial = diseno ?? DisenoTienda.desdeRubros(propuesta.rubros);
+    disenoInicial.validar();
     final confirmado = negocio.copiar(
       configurado: true,
       plantilla: propuesta.plantilla,
       rubros: propuesta.rubros,
       categorias: propuesta.categorias,
-      atributos: propuesta.atributos,
+      atributos: atributos ?? propuesta.atributos,
       tipoTienda: propuesta.tipoTienda,
       duenoEmail: duenoEmail.trim(),
+      asistenteListo: asistenteListo,
+      diseno: disenoInicial,
+      apariencia: apariencia ??
+          AparienciaTienda.paraRubros(
+            gastronomiaSola: propuesta.rubros.length == 1 &&
+                propuesta.rubros.contains(CatalogoRubros.gastronomia.nombre),
+            indumentaria:
+                propuesta.rubros.contains(CatalogoRubros.indumentaria.nombre),
+            tecnologia:
+                propuesta.rubros.contains(CatalogoRubros.tecnologia.nombre),
+          ),
     );
     await _guardar(confirmado);
     await _publicar(confirmado);
@@ -710,6 +1107,11 @@ const _aliasPlantilla = {
   'productos tecnologicos': 'Tecnología',
   'indumentaria': 'Indumentaria',
   'gastronomia': 'Gastronomía',
+  'rotiseria': 'Rotisería',
+  'cosmeticos': 'Cosméticos',
+  'servicios': 'Servicios',
+  'perfumes': 'Perfumes',
+  'ropa': 'Indumentaria',
   'general': 'General',
 };
 
@@ -777,4 +1179,9 @@ List<String> _textos(dynamic crudo) {
     salida.add(texto);
   }
   return salida;
+}
+
+double? _coord(Object? valor) {
+  if (valor is num) return valor.toDouble();
+  return double.tryParse(valor?.toString() ?? '');
 }

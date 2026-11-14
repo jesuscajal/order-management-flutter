@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -7,9 +8,13 @@ import '../data/ampliacion_local.dart';
 import '../data/app_database.dart' show AppDatabase;
 import '../data/cobro_local.dart';
 import '../data/pedido_repository.dart';
+import '../data/vidriera_local.dart';
 import '../models/pedido_estado.dart';
 import '../models/producto_pedido.dart';
+import '../services/avisos/avisos_pedido_tienda.dart';
+import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 
 /// pendiente y pendiente de pago comparten el ámbar; pagado usa el verde
 /// de completado, confirmado el azul de en curso, entregado el verde y
@@ -29,6 +34,16 @@ Color colorPedidoEstado(String raw) {
       return AppColors.alerta;
     case null:
       return AppColors.textoSuave;
+  }
+}
+
+mixin _ConMoneda<T extends StatefulWidget> on State<T> {
+  String _codigoMoneda = monedaPorDefecto;
+
+  Future<void> _leerMoneda() async {
+    final codigo = await monedaDelNegocio();
+    if (!mounted || codigo == _codigoMoneda) return;
+    setState(() => _codigoMoneda = codigo);
   }
 }
 
@@ -57,6 +72,9 @@ class _PedidoVista {
     this.descuentoMonto = 0,
     this.descuentoTipo = '',
     this.descuentoValor = 0,
+    this.origen = 'local',
+    this.vendidoPor = '',
+    this.cobradoPor = '',
   });
 
   final int id;
@@ -71,6 +89,11 @@ class _PedidoVista {
   final double descuentoMonto;
   final String descuentoTipo;
   final double descuentoValor;
+  final String origen;
+  final String vendidoPor;
+  final String cobradoPor;
+
+  bool get esDeLaWeb => origen.trim().toLowerCase() == 'tienda';
 
   double get subtotal => calcularMontoTotal([
         for (final producto in productos)
@@ -100,6 +123,9 @@ class _PedidoVista {
       descuentoMonto: descuentoMonto,
       descuentoTipo: descuentoTipo,
       descuentoValor: descuentoValor,
+      origen: origen,
+      vendidoPor: vendidoPor,
+      cobradoPor: cobradoPor,
     );
   }
 }
@@ -171,18 +197,32 @@ class _BorradorPedido {
   final double descuentoMonto;
 }
 
-class _PedidosScreenState extends State<PedidosScreen> {
+class _PedidosScreenState extends State<PedidosScreen> with _ConMoneda {
   PedidoRepository? _repo;
   List<_PedidoVista> _pedidos = [];
   bool _cargando = true;
   String? _error;
   String _filtro = 'todos';
+  String _canal = 'manual';
   String _consulta = '';
+  Map<int, String> _fotos = {};
+  StreamSubscription<void>? _llegadas;
 
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     _vincular(widget.database, notificar: false);
+    _llegadas = AvisosPedidoTienda.alLlegar.listen((_) {
+      if (!mounted) return;
+      _cargar();
+    });
+  }
+
+  @override
+  void dispose() {
+    _llegadas?.cancel();
+    super.dispose();
   }
 
   @override
@@ -250,12 +290,17 @@ class _PedidosScreenState extends State<PedidosScreen> {
     try {
       final pedidos = await repo.listarPedidos();
       final metas = await const AmpliacionLocal().cargar();
+      final vidriera = await const VidrieraLocal().cargar();
       if (!mounted) return;
       setState(() {
         _pedidos = [
           for (final pedido in pedidos)
             _vistaDe(pedido, metas.pedidos[pedido.id]),
         ];
+        _fotos = {
+          for (final pedido in pedidos)
+            pedido.id: _fotoDe(pedido, vidriera),
+        };
         _cargando = false;
         _error = null;
       });
@@ -294,6 +339,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
       descuentoMonto: meta?.descuentoSobre(subtotal) ?? 0,
       descuentoTipo: meta?.descuentoTipo ?? '',
       descuentoValor: meta?.descuentoValor ?? 0,
+      origen: meta?.origen ?? 'local',
+      vendidoPor: meta?.autor ?? '',
+      cobradoPor: meta?.cobradoPor ?? '',
     );
   }
 
@@ -348,15 +396,51 @@ class _PedidosScreenState extends State<PedidosScreen> {
     return productos;
   }
 
+  String _fotoDe(PedidoResumen pedido, Map<int, DatoVidriera> vidriera) {
+    for (final item in pedido.items) {
+      final dato = vidriera[item.productoId];
+      if (dato == null) continue;
+      for (final foto in dato.galeria) {
+        if (foto.base64.isNotEmpty) return foto.base64;
+      }
+      if (dato.fotoBase64.isNotEmpty) return dato.fotoBase64;
+    }
+    return '';
+  }
+
+  bool _pasaCanal(_PedidoVista pedido) {
+    return _canal == 'web' ? pedido.esDeLaWeb : !pedido.esDeLaWeb;
+  }
+
+  bool _pasaFiltro(_PedidoVista pedido) {
+    final leido = PedidoEstados.leer(pedido.estado);
+    switch (_filtro) {
+      case 'pendientes':
+        return leido == PedidoEstado.pendiente ||
+            leido == PedidoEstado.pendienteDePago;
+      case 'en_proceso':
+        return leido == PedidoEstado.confirmado;
+      case 'entregados':
+        return leido == PedidoEstado.entregado;
+      case 'pagados':
+        return leido == PedidoEstado.pagado;
+      case 'cancelados':
+        return leido == PedidoEstado.cancelado;
+      default:
+        return true;
+    }
+  }
+
   List<_PedidoVista> get _filtrados {
     final consulta = _consulta.trim().toLowerCase();
     final lista = _pedidos.where((pedido) {
-      final leido = PedidoEstados.leer(pedido.estado);
-      final filtro = _filtro == 'todos' ? null : PedidoEstados.leer(_filtro);
-      final estadoOk = filtro == null || leido == filtro;
-      final clienteOk = consulta.isEmpty ||
-          pedido.clienteNombre.toLowerCase().contains(consulta);
-      return estadoOk && clienteOk;
+      if (!_pasaCanal(pedido) || !_pasaFiltro(pedido)) return false;
+      if (consulta.isEmpty) return true;
+      final numero = 'p-${pedido.id.toString().padLeft(5, '0')}';
+      final productos = pedido.productos.map((item) => item.nombre).join(' ');
+      final texto = '${pedido.clienteNombre} $numero ${pedido.id} $productos'
+          .toLowerCase();
+      return texto.contains(consulta);
     }).toList();
     lista.sort((a, b) {
       final porFecha = b.fecha.compareTo(a.fecha);
@@ -502,6 +586,9 @@ class _PedidosScreenState extends State<PedidosScreen> {
         descuentoValor: borrador.descuentoValor,
         descuentoMonto: borrador.descuentoMonto,
       );
+      if (borrador.montoSenado > 0) {
+        await const AmpliacionLocal().anotarCobro(id);
+      }
       if (borrador.fiado &&
           borrador.diaCobro != null &&
           borrador.clienteNombre.trim().isNotEmpty) {
@@ -564,6 +651,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
             descuentoMonto: descuento,
             descuentoTipo: borrador.descuentoTipo,
             descuentoValor: borrador.descuentoValor,
+            origen: 'local',
           ),
         );
         _error = null;
@@ -633,6 +721,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
     }
 
     await repo.registrarSena(pedidoId: pedido.id, pago: pago);
+    await const AmpliacionLocal().anotarCobro(pedido.id);
     if (!mounted) return pedido;
     await _cargar();
     if (!mounted) return pedido;
@@ -657,54 +746,151 @@ class _PedidosScreenState extends State<PedidosScreen> {
     }
   }
 
+  Iterable<_PedidoVista> get _delCanal =>
+      _pedidos.where(_pasaCanal);
+
+  int get _pedidosHoy {
+    final ahora = DateTime.now();
+    return _delCanal.where((pedido) {
+      final fecha = pedido.fecha;
+      return fecha.year == ahora.year &&
+          fecha.month == ahora.month &&
+          fecha.day == ahora.day;
+    }).length;
+  }
+
+  int get _pendientes {
+    return _delCanal.where((pedido) {
+      final leido = PedidoEstados.leer(pedido.estado);
+      return leido == PedidoEstado.pendiente ||
+          leido == PedidoEstado.pendienteDePago;
+    }).length;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.fondoClaro,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text(
-          'Pedidos',
-          style: TextStyle(
-            color: AppColors.texto,
-            fontWeight: FontWeight.w800,
+      backgroundColor: const Color(0xFFF7F8FA),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'venta-directa',
+            backgroundColor: Colors.white,
+            foregroundColor: const Color(0xFF16A34A),
+            elevation: 2,
+            onPressed: () => _nuevoPedido(ventaDirecta: true),
+            tooltip: 'Venta directa',
+            child: const Icon(Icons.point_of_sale),
           ),
-        ),
+          const SizedBox(height: 10),
+          FloatingActionButton.extended(
+            heroTag: 'nuevo-pedido',
+            backgroundColor: const Color(0xFF22C55E),
+            foregroundColor: Colors.white,
+            elevation: 3,
+            onPressed: _nuevoPedido,
+            icon: const Icon(Icons.add),
+            label: const Text(
+              'Nuevo pedido',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+            ),
+          ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppColors.primario,
-        foregroundColor: Colors.white,
-        onPressed: _nuevoPedido,
-        tooltip: 'Nuevo pedido',
-        child: const Icon(Icons.add),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            TextField(
-              style: const TextStyle(color: AppColors.texto),
-              decoration: const InputDecoration(
-                labelText: 'Buscar por cliente',
-                prefixIcon: Icon(Icons.search, color: AppColors.primario),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
+              child: Column(
+                children: [
+                  Text(
+                    'Pedidos',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.texto,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.4,
+                    ),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    'Gestiona y da seguimiento a tus pedidos',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textoSuave,
+                      fontSize: 14,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
               ),
-              onChanged: (valor) => setState(() => _consulta = valor),
             ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => _nuevoPedido(ventaDirecta: true),
-                icon: const Icon(Icons.point_of_sale, color: AppColors.primario),
-                label: const Text('Venta directa'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: TextField(
+                style: const TextStyle(color: AppColors.texto, fontSize: 15),
+                decoration: InputDecoration(
+                  hintText: 'Buscar pedido, cliente o producto...',
+                  hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
+                  prefixIcon: const Icon(Icons.search, color: Color(0xFF9CA3AF)),
+                  filled: true,
+                  fillColor: Colors.white,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: const BorderSide(color: Color(0xFF22C55E)),
+                  ),
+                ),
+                onChanged: (valor) => setState(() => _consulta = valor),
               ),
             ),
+            const SizedBox(height: 12),
+            _canales(),
+            const SizedBox(height: 10),
             _filtros(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _ResumenDia(
+                      icono: Icons.shopping_cart_outlined,
+                      color: const Color(0xFF22C55E),
+                      fondo: const Color(0xFFE8F8EE),
+                      titulo: 'Pedidos hoy',
+                      valor: _pedidosHoy,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _ResumenDia(
+                      icono: Icons.assignment_outlined,
+                      color: const Color(0xFF3B82F6),
+                      fondo: const Color(0xFFE8F1FE),
+                      titulo: 'Pendientes',
+                      valor: _pendientes,
+                    ),
+                  ),
+                ],
+              ),
+            ),
             if (_error != null)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: Text(
                   _error!,
                   style: const TextStyle(color: AppColors.alerta),
@@ -713,7 +899,7 @@ class _PedidosScreenState extends State<PedidosScreen> {
             const SizedBox(height: 8),
             Expanded(
               child: RefreshIndicator(
-                color: AppColors.primario,
+                color: const Color(0xFF22C55E),
                 onRefresh: _cargar,
                 child: _contenido(),
               ),
@@ -724,41 +910,74 @@ class _PedidosScreenState extends State<PedidosScreen> {
     );
   }
 
-  Widget _filtros() {
-    const opciones = ['todos', ...PedidoEstados.valores];
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final opcion in opciones)
-          FilterChip(
-            label: Text(
-              opcion == 'todos' ? 'Todos' : PedidoEstados.etiqueta(opcion),
-            ),
-            selected: _filtro == opcion,
-            showCheckmark: false,
-            visualDensity: VisualDensity.compact,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            backgroundColor: _colorFiltro(opcion).withValues(alpha: 0.08),
-            selectedColor: _colorFiltro(opcion).withValues(alpha: 0.18),
-            side: BorderSide(
-              color: _colorFiltro(opcion).withValues(
-                alpha: _filtro == opcion ? 0.9 : 0.35,
+  Widget _canales() {
+    const opciones = [
+      ('manual', 'Pedidos manuales'),
+      ('web', 'Pedidos por la página web'),
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          for (var i = 0; i < opciones.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+              child: _CanalPedido(
+                titulo: opciones[i].$2,
+                activo: _canal == opciones[i].$1,
+                onTap: () => setState(() => _canal = opciones[i].$1),
               ),
             ),
-            labelStyle: TextStyle(
-              color: _colorFiltro(opcion),
-              fontWeight: FontWeight.w700,
-            ),
-            onSelected: (_) => setState(() => _filtro = opcion),
-          ),
-      ],
+          ],
+        ],
+      ),
     );
   }
 
-  Color _colorFiltro(String opcion) {
-    if (opcion == 'todos') return AppColors.primario;
-    return colorPedidoEstado(opcion);
+  Widget _filtros() {
+    const opciones = [
+      ('todos', 'Todos'),
+      ('pendientes', 'Pendientes'),
+      ('en_proceso', 'En proceso'),
+      ('entregados', 'Entregados'),
+      ('pagados', 'Pagados'),
+      ('cancelados', 'Cancelados'),
+    ];
+    return SizedBox(
+      height: 40,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: opciones.length,
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final opcion = opciones[index].$1;
+          final etiqueta = opciones[index].$2;
+          final activo = _filtro == opcion;
+          return ChoiceChip(
+            label: Text(etiqueta),
+            selected: activo,
+            showCheckmark: false,
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            labelStyle: TextStyle(
+              color: activo ? Colors.white : const Color(0xFF4B5563),
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+            selectedColor: const Color(0xFF22C55E),
+            backgroundColor: Colors.white,
+            side: BorderSide(
+              color: activo ? const Color(0xFF22C55E) : const Color(0xFFE5E7EB),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            onSelected: (_) => setState(() => _filtro = opcion),
+          );
+        },
+      ),
+    );
   }
 
   Widget _contenido() {
@@ -773,11 +992,16 @@ class _PedidosScreenState extends State<PedidosScreen> {
     }
     final pedidos = _filtrados;
     if (pedidos.isEmpty) {
+      final vacioDelCanal = _delCanal.isEmpty;
       final mensaje = _pedidos.isEmpty
           ? (_error == null
-              ? 'Todavía no hay pedidos.\nTocá + para cargar uno.'
+              ? 'Todavía no hay pedidos.\nTocá Nuevo pedido para cargar uno.'
               : 'Probá de nuevo deslizando hacia abajo.')
-          : 'Ningún pedido coincide con ese filtro.';
+          : vacioDelCanal
+              ? (_canal == 'web'
+                  ? 'Todavía no hay pedidos por la página web.'
+                  : 'Todavía no hay pedidos manuales.')
+              : 'Ningún pedido coincide con ese filtro.';
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
@@ -798,108 +1022,297 @@ class _PedidosScreenState extends State<PedidosScreen> {
   }
 
   Widget _tarjeta(_PedidoVista pedido) {
-    final puedeCancelar = PedidoEstados.siguientesDe(pedido.estado)
-        .contains(PedidoEstado.cancelado);
+    final color = colorPedidoEstado(pedido.estado);
     final resumen = pedido.productos.isEmpty
         ? 'Sin productos'
         : pedido.productos
-            .map((producto) => '${producto.nombre} x${producto.cantidad}')
-            .join(' · ');
+            .map((producto) => '${producto.nombre} (${producto.cantidad})')
+            .join(', ');
+    final numero = pedido.id.toString().padLeft(5, '0');
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: AppColors.tarjeta,
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x120F3A5A),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(20),
           onTap: () => _abrirDetalle(pedido),
+          onLongPress: () {
+            final puedeCancelar = PedidoEstados.siguientesDe(pedido.estado)
+                .contains(PedidoEstado.cancelado);
+            if (puedeCancelar) _cancelarDesdeLista(pedido);
+          },
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+            padding: const EdgeInsets.all(12),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _MiniaturaPedido(foto: _fotos[pedido.id] ?? ''),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        pedido.clienteNombre,
-                        style: const TextStyle(
-                          color: AppColors.texto,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
-                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Pedido #P-$numero',
+                              style: const TextStyle(
+                                color: AppColors.textoSuave,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              _etiquetaTarjeta(pedido.estado),
+                              style: TextStyle(
+                                color: color,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _fechaCorta(pedido.fecha),
-                        style: const TextStyle(color: AppColors.textoSuave),
+                        pedido.clienteNombre,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.texto,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                        ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 2),
                       Text(
                         resumen,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.textoSuave),
+                        style: const TextStyle(
+                          color: AppColors.textoSuave,
+                          fontSize: 13,
+                          height: 1.3,
+                        ),
                       ),
                       const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          _EstadoChip(estado: pedido.estado),
-                          Text(
-                            'Total ${_usd(pedido.total)}',
-                            style: const TextStyle(color: AppColors.texto),
+                          const Icon(
+                            Icons.calendar_today_outlined,
+                            size: 14,
+                            color: AppColors.textoSuave,
                           ),
-                          Text(
-                            'Seña ${_usd(pedido.montoSenado)}',
-                            style: const TextStyle(color: AppColors.textoSuave),
-                          ),
-                          if (pedido.medioPago.isNotEmpty)
-                            Text(
-                              MetaPedido.etiquetaMedio(pedido.medioPago),
-                              style: const TextStyle(color: AppColors.textoSuave),
-                            ),
-                          if (pedido.fiado)
-                            const Text(
-                              'Fiado',
-                              style: TextStyle(
-                                color: AppColors.pendiente,
-                                fontWeight: FontWeight.w700,
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              _fechaLista(pedido.fecha),
+                              style: const TextStyle(
+                                color: AppColors.textoSuave,
+                                fontSize: 12,
                               ),
                             ),
+                          ),
+                          Text(
+                            formatearMoneda(pedido.total, _codigoMoneda),
+                            style: const TextStyle(
+                              color: AppColors.texto,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                            ),
+                          ),
                         ],
                       ),
+                      if (pedido.fiado ||
+                          pedido.medioPago.isNotEmpty ||
+                          pedido.montoSenado > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            [
+                              if (pedido.montoSenado > 0)
+                                'Seña ${formatearMoneda(pedido.montoSenado, _codigoMoneda)}',
+                              if (pedido.medioPago.isNotEmpty)
+                                MetaPedido.etiquetaMedio(pedido.medioPago),
+                              if (pedido.fiado) 'Fiado',
+                            ].join(' · '),
+                            style: const TextStyle(
+                              color: AppColors.textoSuave,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
-                ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, color: AppColors.primario),
-                  onSelected: (valor) {
-                    if (valor == 'ver') {
-                      _abrirDetalle(pedido);
-                    } else if (valor == 'cancelar') {
-                      _cancelarDesdeLista(pedido);
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(
-                      value: 'ver',
-                      child: Text('Ver detalle'),
-                    ),
-                    if (puedeCancelar)
-                      const PopupMenuItem(
-                        value: 'cancelar',
-                        child: Text('Cancelar'),
-                      ),
-                  ],
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CanalPedido extends StatelessWidget {
+  const _CanalPedido({
+    required this.titulo,
+    required this.activo,
+    required this.onTap,
+  });
+
+  final String titulo;
+  final bool activo;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: activo ? const Color(0xFF22C55E) : Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: activo ? const Color(0xFF22C55E) : const Color(0xFFE5E7EB),
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            titulo,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: activo ? Colors.white : const Color(0xFF4B5563),
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+              height: 1.2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ResumenDia extends StatelessWidget {
+  const _ResumenDia({
+    required this.icono,
+    required this.color,
+    required this.fondo,
+    required this.titulo,
+    required this.valor,
+  });
+
+  final IconData icono;
+  final Color color;
+  final Color fondo;
+  final String titulo;
+  final int valor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x100F3A5A),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: fondo,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icono, color: color, size: 20),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            titulo,
+            style: const TextStyle(
+              color: AppColors.textoSuave,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '$valor',
+            style: const TextStyle(
+              color: AppColors.texto,
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              height: 1.1,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniaturaPedido extends StatelessWidget {
+  const _MiniaturaPedido({required this.foto});
+
+  final String foto;
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = bytesDeFotoVidriera(foto);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: SizedBox(
+        width: 64,
+        height: 64,
+        child: bytes == null
+            ? const ColoredBox(
+                color: Color(0xFFF3F4F6),
+                child: Icon(
+                  Icons.inventory_2_outlined,
+                  color: Color(0xFF9CA3AF),
+                ),
+              )
+            : Image.memory(bytes, fit: BoxFit.cover),
       ),
     );
   }
@@ -942,7 +1355,8 @@ class _NuevoPedidoDialog extends StatefulWidget {
   State<_NuevoPedidoDialog> createState() => _NuevoPedidoDialogState();
 }
 
-class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
+class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog>
+    with _ConMoneda {
   final _nombreClienteCtrl = TextEditingController();
   final _nombreCtrl = TextEditingController();
   final _precioCtrl = TextEditingController();
@@ -1008,6 +1422,7 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     if (widget.clientes.isNotEmpty) {
       _clienteId = widget.clientes.first.id;
     }
@@ -1400,7 +1815,7 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
                   ? '${variante.etiqueta} · agotada'
                   : variante.precio == null
                       ? '${variante.etiqueta} · stock ${variante.stock}'
-                      : '${variante.etiqueta} · stock ${variante.stock} · ${_usd(variante.precio!)}',
+                      : '${variante.etiqueta} · stock ${variante.stock} · ${formatearMoneda(variante.precio!, _codigoMoneda)}',
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: AppColors.texto),
             ),
@@ -1570,7 +1985,7 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
             TextField(
               controller: _precioCtrl,
               style: const TextStyle(color: AppColors.texto),
-              decoration: const InputDecoration(labelText: 'Precio (USD)'),
+              decoration: InputDecoration(labelText: 'Precio ($_codigoMoneda)'),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
             ),
@@ -1610,7 +2025,7 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
                   style: const TextStyle(color: AppColors.texto),
                 ),
                 subtitle: Text(
-                  '${_usd(_lineas[i].precio)} c/u · ${_usd(_lineas[i].subtotal)}',
+                  '${formatearMoneda(_lineas[i].precio, _codigoMoneda)} c/u · ${formatearMoneda(_lineas[i].subtotal, _codigoMoneda)}',
                   style: const TextStyle(color: AppColors.textoSuave),
                 ),
                 trailing: IconButton(
@@ -1649,25 +2064,25 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
               decoration: InputDecoration(
                 labelText: _descuentoModo == 'porcentaje'
                     ? 'Porcentaje'
-                    : 'Descuento (USD)',
+                    : 'Descuento ($_codigoMoneda)',
               ),
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
             ),
             if (_descuentoMonto > 0.009) ...[
               Text(
-                'Subtotal ${_usd(_bruto)}',
+                'Subtotal ${formatearMoneda(_bruto, _codigoMoneda)}',
                 style: const TextStyle(color: AppColors.textoSuave),
               ),
               Text(
                 _descuentoModo == 'porcentaje'
-                    ? 'Descuento ${_descuentoCtrl.text.trim()}% · ${_usd(_descuentoMonto)}'
-                    : 'Descuento ${_usd(_descuentoMonto)}',
+                    ? 'Descuento ${_descuentoCtrl.text.trim()}% · ${formatearMoneda(_descuentoMonto, _codigoMoneda)}'
+                    : 'Descuento ${formatearMoneda(_descuentoMonto, _codigoMoneda)}',
                 style: const TextStyle(color: AppColors.texto),
               ),
             ],
             Text(
-              'Total ${_usd(_total)}',
+              'Total ${formatearMoneda(_total, _codigoMoneda)}',
               style: const TextStyle(
                 color: AppColors.texto,
                 fontWeight: FontWeight.w800,
@@ -1756,7 +2171,7 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
               TextField(
                 controller: _senaCtrl,
                 style: const TextStyle(color: AppColors.texto),
-                decoration: const InputDecoration(labelText: 'Seña (USD)'),
+                decoration: InputDecoration(labelText: 'Seña ($_codigoMoneda)'),
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
               )
@@ -1764,7 +2179,7 @@ class _NuevoPedidoDialogState extends State<_NuevoPedidoDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
-                  'Seña ${_usd(_total)}',
+                  'Seña ${formatearMoneda(_total, _codigoMoneda)}',
                   style: const TextStyle(color: AppColors.texto),
                 ),
               ),
@@ -1820,7 +2235,7 @@ class _DetalleDialog extends StatefulWidget {
   State<_DetalleDialog> createState() => _DetalleDialogState();
 }
 
-class _DetalleDialogState extends State<_DetalleDialog> {
+class _DetalleDialogState extends State<_DetalleDialog> with _ConMoneda {
   late _PedidoVista _pedido = widget.pedido;
   MetaPedido? _meta;
   bool _ocupado = false;
@@ -1829,6 +2244,7 @@ class _DetalleDialogState extends State<_DetalleDialog> {
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     _leerComprobante();
   }
 
@@ -1942,7 +2358,7 @@ class _DetalleDialogState extends State<_DetalleDialog> {
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(
             labelText: 'Monto',
-            helperText: 'Resta ${_usd(resta)}. No puede superarlo.',
+            helperText: 'Resta ${formatearMoneda(resta, _codigoMoneda)}. No puede superarlo.',
           ),
         ),
         actions: [
@@ -2019,16 +2435,16 @@ class _DetalleDialogState extends State<_DetalleDialog> {
             const SizedBox(height: 8),
             if (_pedido.descuentoMonto > 0.009) ...[
               Text(
-                'Subtotal ${_usd(_pedido.subtotal)}',
+                'Subtotal ${formatearMoneda(_pedido.subtotal, _codigoMoneda)}',
                 style: const TextStyle(color: AppColors.textoSuave),
               ),
               Text(
-                _etiquetaDescuento(_pedido),
+                _etiquetaDescuento(_pedido, _codigoMoneda),
                 style: const TextStyle(color: AppColors.texto),
               ),
             ],
             Text(
-              'Total ${_usd(_pedido.total)}',
+              'Total ${formatearMoneda(_pedido.total, _codigoMoneda)}',
               style: const TextStyle(
                 color: AppColors.texto,
                 fontWeight: FontWeight.w700,
@@ -2040,9 +2456,19 @@ class _DetalleDialogState extends State<_DetalleDialog> {
                 style: const TextStyle(color: AppColors.texto),
               ),
             Text(
-              'Seña ${_usd(_pedido.montoSenado)}',
+              'Seña ${formatearMoneda(_pedido.montoSenado, _codigoMoneda)}',
               style: const TextStyle(color: AppColors.texto),
             ),
+            if (_pedido.vendidoPor.isNotEmpty)
+              Text(
+                'Vendió ${_pedido.vendidoPor}',
+                style: const TextStyle(color: AppColors.textoSuave),
+              ),
+            if (_pedido.cobradoPor.isNotEmpty)
+              Text(
+                'Cobró ${_pedido.cobradoPor}',
+                style: const TextStyle(color: AppColors.textoSuave),
+              ),
             if (_pedido.fiado)
               Text(
                 resta > 0.009
@@ -2055,7 +2481,7 @@ class _DetalleDialogState extends State<_DetalleDialog> {
               ),
             if (resta > 0.009) ...[
               Text(
-                'Resta ${_usd(resta)}',
+                'Resta ${formatearMoneda(resta, _codigoMoneda)}',
                 style: const TextStyle(color: AppColors.textoSuave),
               ),
               if (PedidoEstados.leer(_pedido.estado) != PedidoEstado.cancelado)
@@ -2168,7 +2594,7 @@ class _DetalleDialogState extends State<_DetalleDialog> {
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  '${producto.nombre} x${producto.cantidad} · ${_usd(producto.precio)} c/u · ${_usd(producto.subtotal)}',
+                  '${producto.nombre} x${producto.cantidad} · ${formatearMoneda(producto.precio, _codigoMoneda)} c/u · ${formatearMoneda(producto.subtotal, _codigoMoneda)}',
                   style: const TextStyle(color: AppColors.texto),
                 ),
               ),
@@ -2254,6 +2680,35 @@ double? _parseMonto(String raw) {
   return double.tryParse(texto);
 }
 
+String _etiquetaTarjeta(String raw) {
+  if (PedidoEstados.leer(raw) == PedidoEstado.confirmado) return 'En proceso';
+  return PedidoEstados.etiqueta(raw);
+}
+
+String _fechaLista(DateTime fecha) {
+  const meses = [
+    'ene.',
+    'feb.',
+    'mar.',
+    'abr.',
+    'may.',
+    'jun.',
+    'jul.',
+    'ago.',
+    'sep.',
+    'oct.',
+    'nov.',
+    'dic.',
+  ];
+  final ahora = DateTime.now();
+  final hoy = DateTime(ahora.year, ahora.month, ahora.day);
+  final dia = DateTime(fecha.year, fecha.month, fecha.day);
+  final resto = '${fecha.day} de ${meses[fecha.month - 1]} ${fecha.year}';
+  if (dia == hoy) return 'Hoy, $resto';
+  if (dia == hoy.subtract(const Duration(days: 1))) return 'Ayer, $resto';
+  return resto;
+}
+
 String _fechaCorta(DateTime fecha) =>
     '${fecha.day}/${fecha.month}/${fecha.year}';
 
@@ -2272,17 +2727,15 @@ String _nombreConDetalle(String nombre, LineaMeta linea) {
   return '$nombre · ${extras.join(' · ')}';
 }
 
-String _usd(double valor) => 'USD ${valor.toStringAsFixed(2)}';
-
-String _etiquetaDescuento(_PedidoVista pedido) {
+String _etiquetaDescuento(_PedidoVista pedido, String codigo) {
   if (pedido.descuentoTipo == 'porcentaje' && pedido.descuentoValor > 0) {
     final pct = pedido.descuentoValor;
     final texto = pct == pct.roundToDouble()
         ? pct.toStringAsFixed(0)
         : pct.toStringAsFixed(2);
-    return 'Descuento $texto% (${_usd(pedido.descuentoMonto)})';
+    return 'Descuento $texto% (${formatearMoneda(pedido.descuentoMonto, codigo)})';
   }
-  return 'Descuento ${_usd(pedido.descuentoMonto)}';
+  return 'Descuento ${formatearMoneda(pedido.descuentoMonto, codigo)}';
 }
 
 String _mensajeDe(Object error) {
@@ -2293,3 +2746,4 @@ String _mensajeDe(Object error) {
   }
   return 'No se pudo completar la acción.';
 }
+

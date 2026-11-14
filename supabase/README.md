@@ -23,9 +23,8 @@ El login tiene que dejar el email en el JWT (`auth.jwt() ->> 'email'`). Con eso,
 ## Tienda pública
 Después de aplicar `0001_gexi.sql`, ejecutá `supabase/migrations/0002_tienda_publica.sql` en el SQL Editor.
 La migración agrega la configuración de tienda y vistas de solo lectura para `anon`, sin abrir las tablas base.
-Configurá el DNS comodín `*.gexi-novaceltec.com` y el apex `gexi-novaceltec.com` hacia el mismo hosting de Flutter web.
-Configurá también `www.gexi-novaceltec.com` hacia ese hosting.
-La app decide por el host: un subdominio válido muestra su tienda; el apex y `www` muestran Gexi.
+Publicá el sitio en `gexi.com.ar`. Cada tienda abre en `https://gexi.com.ar/{slug}`.
+La raíz y `www` muestran el ingreso a Gexi.
 
 ## Esquema amplio
 

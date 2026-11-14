@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../backend/stock_remoto.dart';
 import 'app_database.dart';
+import 'stock_pedido_web.dart';
 
 /// Producto con las cantidades de los dos propietarios que muestra la pantalla.
 class ProductoStock {
@@ -144,6 +145,30 @@ class StockRepository {
         cantidad: cantidad,
         esEntrada: true,
         descripcion: 'Alta de stock',
+      ),
+    );
+  }
+
+  /// Baja unidades que la nube ya descontó por un pedido web.
+  ///
+  /// No publica otra salida: el saldo remoto ya quedó en ese número.
+  Future<int> anotarSalidaYaEnNube({
+    required int productoId,
+    required String propietario,
+    required int cantidad,
+    required String descripcion,
+    DateTime? fecha,
+  }) {
+    if (StockPedidoWeb.uuidDe(descripcion) == null) {
+      throw StockException('La salida no corresponde a un pedido web.');
+    }
+    return _enOrden(
+      () => _anotarSalidaYaEnNube(
+        productoId: productoId,
+        propietario: propietario,
+        cantidad: cantidad,
+        descripcion: descripcion.trim(),
+        fecha: fecha ?? DateTime.now(),
       ),
     );
   }
@@ -316,6 +341,62 @@ class StockRepository {
           fechaSalida: movimiento.fechaSalida,
         ),
     ];
+  }
+
+  Future<int> _anotarSalidaYaEnNube({
+    required int productoId,
+    required String propietario,
+    required int cantidad,
+    required String descripcion,
+    required DateTime fecha,
+  }) async {
+    if (cantidad <= 0) {
+      throw StockException('La cantidad debe ser mayor a cero.');
+    }
+    final propietarios = await _usuarios();
+    final usuarioId = _idPropietario(propietarios, propietario);
+    return db.transaction(() async {
+      final producto = await (db.select(db.productos)
+            ..where((fila) => fila.id.equals(productoId)))
+          .getSingleOrNull();
+      if (producto == null) {
+        throw StockException('No se encontró el producto.');
+      }
+      final filas = await (db.select(db.stock)
+            ..where(
+              (fila) =>
+                  fila.productoId.equals(productoId) &
+                  fila.usuarioId.equals(usuarioId),
+            ))
+          .get();
+      final actual = filas.fold<int>(
+        0,
+        (suma, fila) => suma + fila.cantidadActual,
+      );
+      final nuevo = actual - cantidad;
+      if (filas.isEmpty || nuevo < 0) {
+        throw StockException(
+          'No hay stock suficiente de ${producto.nombre}. Hay $actual y el pedido web pide $cantidad.',
+        );
+      }
+      await (db.update(db.stock)..where((fila) => fila.id.equals(filas.first.id)))
+          .write(StockCompanion(cantidadActual: Value(nuevo)));
+      for (final extra in filas.skip(1)) {
+        await (db.delete(db.stock)..where((fila) => fila.id.equals(extra.id)))
+            .go();
+      }
+      return db.into(db.movimientosStock).insert(
+            MovimientosStockCompanion.insert(
+              productoId: productoId,
+              usuarioId: usuarioId,
+              tipo: tipoSalida,
+              cantidad: cantidad,
+              descripcion: Value(descripcion),
+              fechaCarga: Value(fecha),
+              fechaSalida: Value(fecha),
+            ),
+          );
+    });
   }
 
   Future<void> _aplicar({

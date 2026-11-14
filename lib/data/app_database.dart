@@ -118,4 +118,20 @@ class AppDatabase extends _$AppDatabase {
 
   @override
   int get schemaVersion => 1;
+
+  /// Vacía pedidos, stock y clientes. El negocio en preferencias no se toca.
+  Future<void> vaciar() {
+    return transaction(() async {
+      await delete(historialPedidos).go();
+      await delete(historialClientes).go();
+      await delete(productosPedido).go();
+      await delete(movimientosStock).go();
+      await delete(movimientosCapital).go();
+      await delete(stock).go();
+      await delete(pedidos).go();
+      await delete(productos).go();
+      await delete(clientes).go();
+      await delete(usuarios).go();
+    });
+  }
 }

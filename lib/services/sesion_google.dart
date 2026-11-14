@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../backend/sesion_remota.dart';
+import '../backend/supabase_cliente.dart';
+import 'google_ids.dart';
 import 'google_client_id.dart'
     if (dart.library.html) 'google_client_id_web.dart';
 
@@ -49,7 +52,22 @@ class AuthGoogle {
   GoogleSignIn _cliente() {
     return _google ??= GoogleSignIn(
       scopes: const ['email', 'profile'],
+      serverClientId: kIsWeb ? null : idClienteGoogleWeb,
     );
+  }
+
+  /// Si la cuenta ya está en el teléfono pero Supabase no tiene sesión,
+  /// pide el token de nuevo en silencio y abre la sesión de la nube.
+  Future<void> asegurarSupabase() async {
+    final local = await leer();
+    if (local == null) return;
+    try {
+      final cliente = SupabaseListo.cliente;
+      if (cliente == null || cliente.auth.currentSession != null) return;
+      final cuenta = await _cliente().signInSilently();
+      if (cuenta == null) return;
+      await _abrirNube(cuenta);
+    } catch (_) {}
   }
 
   Future<SesionGoogle?> leer() async {
@@ -89,6 +107,7 @@ class AuthGoogle {
     }
     final cuenta = await _cliente().signIn();
     if (cuenta == null) return null;
+    await _abrirNube(cuenta);
     final sesion = SesionGoogle(
       nombre: (cuenta.displayName ?? '').trim().isEmpty
           ? cuenta.email
@@ -99,6 +118,20 @@ class AuthGoogle {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_clave, jsonEncode(sesion.toJson()));
     return sesion;
+  }
+
+  Future<void> _abrirNube(GoogleSignInAccount cuenta) async {
+    final token = await cuenta.authentication;
+    final idToken = token.idToken?.trim() ?? '';
+    if (idToken.isEmpty) {
+      throw const SesionRemotaException(
+        'Google no entregó el token para guardar la cuenta en la nube.',
+      );
+    }
+    await const SesionRemota().entrarConGoogle(
+      idToken: idToken,
+      accessToken: token.accessToken,
+    );
   }
 
   Future<void> salir() async {

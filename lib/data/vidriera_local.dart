@@ -158,6 +158,7 @@ class VidrieraLocal {
     required String descripcion,
     required String fotoBase64,
     List<FotoVidriera>? fotos,
+    bool subir = true,
   }) async {
     final limpia = descripcion.trim();
     if (fotos == null) {
@@ -179,12 +180,14 @@ class VidrieraLocal {
           'No se pudo guardar la foto y la descripción.',
         );
       }
-      ReplicaScope.diferir(
-        () => CatalogoRemoto.publicarDescripcion(
-          productoLocalId: productoId,
-          descripcion: limpia,
-        ),
-      );
+      if (subir) {
+        ReplicaScope.diferir(
+          () => CatalogoRemoto.publicarDescripcion(
+            productoLocalId: productoId,
+            descripcion: limpia,
+          ),
+        );
+      }
       return;
     }
 
@@ -216,6 +219,7 @@ class VidrieraLocal {
         'No se pudo guardar la foto y la descripción.',
       );
     }
+    if (!subir) return;
     ReplicaScope.diferir(
       () => CatalogoRemoto.publicarVidriera(
         productoLocalId: productoId,

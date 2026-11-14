@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../backend/negocio_remoto.dart';
+import '../data/apariencia_tienda.dart';
 import '../services/negocio_local.dart';
+import '../services/propuesta_ia.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fondo_gexi.dart';
 import '../widgets/logo_gexi.dart';
@@ -8,12 +11,12 @@ import '../widgets/logo_gexi.dart';
 class CrearNegocioScreen extends StatefulWidget {
   const CrearNegocioScreen({
     super.key,
-    required this.alCrear,
+    required this.alEmpezar,
     required this.duenoEmail,
     required this.alUnirse,
   });
 
-  final ValueChanged<NegocioLocal> alCrear;
+  final VoidCallback alEmpezar;
   final ValueChanged<NegocioLocal> alUnirse;
   final String duenoEmail;
 
@@ -22,80 +25,42 @@ class CrearNegocioScreen extends StatefulWidget {
 }
 
 class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
-  final _nombre = TextEditingController();
-  final _descripcion = TextEditingController();
+  final _codigoEmpleado = TextEditingController();
   bool _guardando = false;
+  String _paso = 'eleccion';
 
   @override
   void dispose() {
-    _nombre.dispose();
-    _descripcion.dispose();
+    _codigoEmpleado.dispose();
     super.dispose();
   }
 
-  Future<void> _continuar() async {
-    if (_nombre.text.trim().isEmpty || _descripcion.text.trim().isEmpty) {
+  Future<void> _entrarConCodigo() async {
+    if (_guardando) return;
+    final escrito = _codigoEmpleado.text.trim();
+    if (escrito.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completá el nombre y a qué se dedica el negocio.')),
+        const SnackBar(content: Text('Ingresá el código que te pasó quien administra.')),
       );
       return;
     }
     setState(() => _guardando = true);
     try {
-      final negocio = await NegocioStore().crear(
-        nombre: _nombre.text,
-        descripcion: _descripcion.text,
-        duenoEmail: widget.duenoEmail,
-      );
-      if (!mounted) return;
-      widget.alCrear(negocio);
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo guardar el negocio.')),
-      );
-    } finally {
-      if (mounted) setState(() => _guardando = false);
-    }
-  }
-
-  Future<void> _entrarConCodigo() async {
-    if (_guardando) return;
-    final campo = TextEditingController();
-    final codigo = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Código de empleado'),
-        content: TextField(
-          controller: campo,
-          autofocus: true,
-          textCapitalization: TextCapitalization.characters,
-          decoration: const InputDecoration(
-            labelText: 'Código',
-            helperText: 'Te lo da quien administra el negocio.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, campo.text.trim()),
-            child: const Text('Entrar'),
-          ),
-        ],
-      ),
-    );
-    final escrito = codigo ?? '';
-    campo.dispose();
-    if (escrito.isEmpty || !mounted) return;
-    setState(() => _guardando = true);
-    try {
-      final negocio = await NegocioStore().unirEmpleado(
-        codigo: escrito,
-        email: widget.duenoEmail,
-      );
+      NegocioLocal negocio;
+      try {
+        negocio = await NegocioStore().unirEmpleado(
+          codigo: escrito,
+          email: widget.duenoEmail,
+        );
+      } on StateError catch (error) {
+        if (!error.message.contains('este dispositivo')) rethrow;
+        final remoto = await const NegocioRemoto().reclamarCodigo(escrito);
+        if (remoto == null) {
+          throw StateError('No encontramos ese código de empleado.');
+        }
+        await NegocioStore().guardarLocal(remoto);
+        negocio = remoto;
+      }
       if (!mounted) return;
       widget.alUnirse(negocio);
     } on StateError catch (error) {
@@ -103,10 +68,16 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error.message)),
       );
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
+      final texto = error.toString().toLowerCase();
+      final mensaje = texto.contains('otra cuenta')
+          ? 'Ese código ya lo usa otra cuenta.'
+          : texto.contains('no encontramos') || texto.contains('no es válido')
+              ? 'No encontramos ese código de empleado.'
+              : 'No se pudo entrar con ese código. Quien administra tiene que guardar el equipo de nuevo.';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo entrar con ese código.')),
+        SnackBar(content: Text(mensaje)),
       );
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -116,67 +87,89 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
   @override
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
+    if (_paso == 'empleado') return _empleado(tema);
+    return _eleccion(tema);
+  }
+
+  Widget _eleccion(ThemeData tema) {
     return Scaffold(
       backgroundColor: AppColors.fondoClaro,
-      appBar: AppBar(title: const Text('Tu negocio')),
       body: FondoGexi(
-        child: SizedBox.expand(
-          child: ListView(
-            padding: EdgeInsets.fromLTRB(
-              24,
-              8,
-              24,
-              24 + MediaQuery.paddingOf(context).bottom + MediaQuery.viewInsetsOf(context).bottom,
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Center(child: LogoGexi(ancho: 168)),
+                const SizedBox(height: 28),
+                Text(
+                  '¿Cómo entrás?',
+                  textAlign: TextAlign.center,
+                  style: tema.textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Si el negocio es tuyo, lo creás. Si trabajás en uno, entrá con el código que te dio quien administra.',
+                  textAlign: TextAlign.center,
+                  style: tema.textTheme.bodyMedium?.copyWith(height: 1.35),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: widget.alEmpezar,
+                  child: const Text('Crear mi negocio'),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton(
+                  onPressed: () => setState(() => _paso = 'empleado'),
+                  child: const Text('Soy empleado'),
+                ),
+              ],
             ),
-            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            children: [
-              const Center(child: LogoGexi(ancho: 128)),
-              const SizedBox(height: 8),
-              const _Paso(numero: 1),
-              const SizedBox(height: 8),
-              Text(
-                'Contanos el negocio',
-                style: tema.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Escribí el nombre y, en tus palabras, a qué te dedicás. Si mezclás más de un rubro, en el paso siguiente los vas a ver todos.',
-                style: tema.textTheme.bodyMedium?.copyWith(height: 1.35),
-              ),
-              const SizedBox(height: 24),
-              TextField(
-                controller: _nombre,
-                textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.next,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre del negocio',
-                  hintText: 'Novaceltec',
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _descripcion,
-                minLines: 3,
-                maxLines: 5,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: '¿A qué se dedica?',
-                  hintText: 'Vendo celulares y también fundas y ropa',
-                  alignLabelWithHint: true,
-                ),
-              ),
-              const SizedBox(height: 24),
-              FilledButton(
-                onPressed: _guardando ? null : _continuar,
-                child: Text(_guardando ? 'Guardando...' : 'Ver propuesta'),
-              ),
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: _guardando ? null : _entrarConCodigo,
-                child: const Text('Entrar con código de empleado'),
-              ),
-            ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _empleado(ThemeData tema) {
+    return Scaffold(
+      backgroundColor: AppColors.fondoClaro,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: const Text('Soy empleado'),
+      ),
+      body: FondoGexi(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          children: [
+            Text(
+              'Ingresá el código que te pasó quien administra. Las ventas y los cobros que hagas quedan a tu nombre.',
+              style: tema.textTheme.bodyMedium?.copyWith(height: 1.35),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _codigoEmpleado,
+              enabled: !_guardando,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                labelText: 'Código de empleado',
+                hintText: 'AB12CD',
+              ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: _guardando ? null : _entrarConCodigo,
+              child: Text(_guardando ? 'Entrando...' : 'Entrar'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: _guardando ? null : () => setState(() => _paso = 'eleccion'),
+              child: const Text('Volver'),
+            ),
+          ],
         ),
       ),
     );
@@ -203,12 +196,48 @@ class _ConfiguracionAsistidaScreenState extends State<ConfiguracionAsistidaScree
   late final List<String> _detectados;
   final _elegidos = <String>{};
   bool _guardando = false;
+  bool _consultandoIa = true;
+  List<String>? _atributosIa;
+  AparienciaTienda? _aparienciaIa;
+  String _notaIa = '';
 
   @override
   void initState() {
     super.initState();
     _detectados = PropuestaRubro.detectarIds(widget.negocio.descripcion);
     _elegidos.addAll(_detectados);
+    _consultarIa();
+  }
+
+  AparienciaTienda get _apariencia {
+    final guardada = _aparienciaIa;
+    if (guardada != null) return guardada;
+    final ids = _elegidos.toSet();
+    return AparienciaTienda.paraRubros(
+      gastronomiaSola:
+          ids.length == 1 && ids.contains(CatalogoRubros.gastronomia.id),
+      indumentaria: ids.contains(CatalogoRubros.indumentaria.id),
+      tecnologia: ids.contains(CatalogoRubros.tecnologia.id),
+    );
+  }
+
+  Future<void> _consultarIa() async {
+    final propuesta =
+        await const PropuestaIa().desdeDescripcion(widget.negocio.descripcion);
+    if (!mounted) return;
+    setState(() {
+      _consultandoIa = false;
+      if (propuesta == null) {
+        _notaIa = '';
+        return;
+      }
+      _elegidos
+        ..clear()
+        ..addAll(propuesta.rubros);
+      _atributosIa = propuesta.atributos;
+      _aparienciaIa = propuesta.apariencia;
+      _notaIa = 'La IA leyó tu descripción y propuso estos rubros. Podés corregirlos.';
+    });
   }
 
   PropuestaRubro get _propuesta => PropuestaRubro.desdeIds(_elegidos);
@@ -223,7 +252,15 @@ class _ConfiguracionAsistidaScreenState extends State<ConfiguracionAsistidaScree
       } else {
         _elegidos.add(id);
       }
+      _atributosIa = null;
+      _aparienciaIa = null;
     });
+  }
+
+  String _datosProducto() {
+    final datos = _atributosIa ?? _propuesta.atributos;
+    if (datos.isEmpty) return 'nombre y precio';
+    return datos.join(', ');
   }
 
   Future<void> _confirmar() async {
@@ -240,6 +277,8 @@ class _ConfiguracionAsistidaScreenState extends State<ConfiguracionAsistidaScree
         widget.negocio,
         _propuesta,
         duenoEmail: widget.duenoEmail,
+        apariencia: _apariencia,
+        atributos: _atributosIa,
       );
       final guardado = await NegocioStore().leer();
       if (!mounted) return;
@@ -306,9 +345,19 @@ class _ConfiguracionAsistidaScreenState extends State<ConfiguracionAsistidaScree
                     Text('Rubros', style: tema.textTheme.titleMedium),
                     const SizedBox(height: 8),
                     Text(
-                      _textoDeteccion(),
+                      _consultandoIa
+                          ? 'La IA está leyendo tu descripción para proponer el rubro y los datos de cada producto.'
+                          : (_notaIa.isEmpty ? _textoDeteccion() : _notaIa),
                       style: tema.textTheme.bodyMedium?.copyWith(height: 1.35),
                     ),
+                    if (!_consultandoIa &&
+                        (_atributosIa ?? _propuesta.atributos).isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'En cada producto vas a cargar: ${_datosProducto()}.',
+                        style: tema.textTheme.bodyMedium?.copyWith(height: 1.35),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     Wrap(
                       spacing: 8,

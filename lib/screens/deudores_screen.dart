@@ -5,8 +5,10 @@ import 'package:url_launcher/url_launcher.dart';
 import '../data/app_database.dart';
 import '../data/capital_repository.dart';
 import '../data/cobro_local.dart';
+import '../data/paises_latam.dart';
 import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 import '../models/movimiento_capital.dart';
 
 /// Seguimiento de deudas por persona (RF-020 y RF-022).
@@ -29,11 +31,14 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
   Map<String, DatoCobro> _cobros = {};
   bool _soloVencidos = false;
   bool _cargando = false;
+  String _codigoMoneda = monedaPorDefecto;
+  PaisLatam? _pais;
   String? _avisandoClave;
 
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     if (widget.database == null) {
       _movimientos = [
         MovimientoCapital.crear(
@@ -179,7 +184,8 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
   }
 
   Future<String?> _pedirTelefono(String actual) {
-    final campo = TextEditingController(text: actual);
+    final pais = _pais;
+    final campo = TextEditingController(text: telefonoLocal(actual, pais));
     return showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -189,9 +195,13 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
           controller: campo,
           autofocus: true,
           keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Teléfono de WhatsApp',
-            hintText: 'Ejemplo: 5491112345678',
+            prefixText: pais == null ? null : '${pais.prefijo} ',
+            hintText: pais?.ejemplo ?? '11 2345-6789',
+            helperText: pais == null
+                ? 'Elegí la nacionalidad en Cambiar de moneda.'
+                : '${pais.nombre}: característica ${pais.prefijo}.',
           ),
         ),
         actions: [
@@ -200,7 +210,10 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, campo.text.trim()),
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              telefonoConPrefijo(campo.text, pais),
+            ),
             child: const Text('Guardar'),
           ),
         ],
@@ -410,11 +423,19 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
     return ultimo?.descripcion;
   }
 
-  String _dinero(double valor) {
-    final absoluto = valor.abs().toStringAsFixed(2);
-    if (valor < 0) return '-\$$absoluto';
-    return '\$$absoluto';
+  Future<void> _leerMoneda() async {
+    final negocio = await NegocioStore().leer();
+    final codigo = NegocioLocal.normalizarMoneda(negocio?.moneda);
+    final pais = paisPorCodigo(negocio?.pais);
+    if (!mounted) return;
+    if (codigo == _codigoMoneda && pais?.codigo == _pais?.codigo) return;
+    setState(() {
+      _codigoMoneda = codigo;
+      _pais = pais;
+    });
   }
+
+  String _dinero(double valor) => formatearMoneda(valor, _codigoMoneda);
 
   Future<void> _registrarPago({
     required String persona,

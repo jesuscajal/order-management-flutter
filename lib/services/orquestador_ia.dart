@@ -2,11 +2,14 @@ import 'dart:convert';
 
 import '../data/app_database.dart';
 import '../data/capital_repository.dart';
+import '../data/funciones_asistente.dart';
 import '../data/pedido_repository.dart';
 import '../data/stock_repository.dart';
 import '../models/pedido_estado.dart';
+import 'asistente/metricas_asistente.dart';
 import 'asistente_enrutador.dart';
 import 'negocio_contexto.dart';
+import 'negocio_local.dart';
 import 'openai_chat_service.dart';
 import 'prompts_asistente.dart';
 
@@ -52,6 +55,18 @@ class OrquestadorIa {
       return const RespuestaAsistente('Escribime qué necesitás.');
     }
 
+    final funciones = await NegocioStore().leerFuncionesAsistente();
+
+    if (_esInformeConsumo(normalizado)) {
+      return RespuestaAsistente(await _informeConsumo());
+    }
+    final periodo = _periodoVentas(normalizado);
+    if (periodo != null) {
+      if (periodo == PeriodoVentas.hoy && !funciones.ventasHoy) {
+        return const RespuestaAsistente(mensajeVentasHoyApagado);
+      }
+      return RespuestaAsistente(await _informeVentas(database, periodo));
+    }
     if (_esInformeDeudas(normalizado)) {
       return RespuestaAsistente(await _informeDeudas(database));
     }
@@ -61,10 +76,34 @@ class OrquestadorIa {
     if (_esInformeCapital(normalizado)) {
       return RespuestaAsistente(await _informeCapital(database));
     }
-    if (_esInformeStock(normalizado)) {
+    if (_esInformeStock(normalizado) ||
+        clasificarIntencion(texto) == IntencionAsistente.stock) {
+      if (!funciones.consultarStock) {
+        return const RespuestaAsistente(mensajeConsultarStockApagado);
+      }
+      if (_esInformeStock(normalizado)) {
+        return RespuestaAsistente(
+          await _informeStock(database, texto, normalizado),
+        );
+      }
       return RespuestaAsistente(
-        await _informeStock(database, texto, normalizado),
+        await _enrutador.consultarStock(database: database, texto: texto),
       );
+    }
+    if (parecePreguntaHorarioDireccion(texto)) {
+      if (!funciones.horarioDireccion) {
+        return const RespuestaAsistente(mensajeHorarioApagado);
+      }
+      final negocio = await NegocioStore().leer();
+      return RespuestaAsistente(
+        textoHorarioDireccion(
+          horario: negocio?.horario ?? '',
+          direccion: negocio?.mapsUrl ?? '',
+        ),
+      );
+    }
+    if (!funciones.anotarVenta && ventaSola(texto)) {
+      return const RespuestaAsistente(mensajeAnotarVentaApagado);
     }
 
     final producto = _productoLocal(normalizado);
@@ -77,18 +116,15 @@ class OrquestadorIa {
       return InterpretacionAsistente(interpretacion);
     }
 
-    final ajuste = await _ajusteLocal(database, normalizado);
-    if (ajuste != null) return InterpretacionAsistente(ajuste);
-
-    if (mencionaFoto(texto)) {
-      return const RespuestaAsistente(
-        '$alcanceAsistente La carga por foto queda fuera de este prototipo.',
-      );
+    if (mencionaFoto(texto) &&
+        clasificarIntencion(texto) == IntencionAsistente.fuera &&
+        esperando == null) {
+      return RespuestaAsistente(respuestaFueraDeAlcance(texto));
     }
     if (esperando != null || _pareceDelDominio(normalizado)) {
       return const RequiereModelo();
     }
-    return const RespuestaAsistente(alcanceAsistente);
+    return RespuestaAsistente(alcanceConFunciones(funciones));
   }
 
   /// Nivel 3: una sola llamada al modelo y respuesta JSON obligatoria.
@@ -100,8 +136,7 @@ class OrquestadorIa {
     final contexto = await NegocioContexto(database).resumir();
     final raw = await _chat.responderJson(
       apiKey: apiKey,
-      systemPrompt: '${PromptsAsistente.systemPrompt}\n'
-          'Para este prototipo, si no se indica propietario usá Yo por defecto.',
+      systemPrompt: PromptsAsistente.systemPrompt,
       contextoNegocio: contexto,
       historial: historial,
     );
@@ -313,6 +348,71 @@ class OrquestadorIa {
     return buffer.toString();
   }
 
+  Future<String> _informeVentas(AppDatabase database, PeriodoVentas periodo) async {
+    final ahora = DateTime.now();
+    final hoy = DateTime(ahora.year, ahora.month, ahora.day);
+    final desde = switch (periodo) {
+      PeriodoVentas.hoy => hoy,
+      PeriodoVentas.ayer => hoy.subtract(const Duration(days: 1)),
+      PeriodoVentas.semana => hoy.subtract(Duration(days: hoy.weekday - 1)),
+      PeriodoVentas.mes => DateTime(hoy.year, hoy.month),
+    };
+    final hasta = periodo == PeriodoVentas.ayer ? hoy : null;
+    final titulo = switch (periodo) {
+      PeriodoVentas.hoy => 'hoy',
+      PeriodoVentas.ayer => 'ayer',
+      PeriodoVentas.semana => 'esta semana',
+      PeriodoVentas.mes => 'este mes',
+    };
+    final pedidos = (await PedidoRepository(database).listarPedidos()).where(
+      (pedido) {
+        final estado = PedidoEstados.leer(pedido.estado);
+        if (estado == PedidoEstado.cancelado ||
+            estado == PedidoEstado.pendiente) {
+          return false;
+        }
+        if (pedido.fecha.isBefore(desde)) return false;
+        if (hasta != null && !pedido.fecha.isBefore(hasta)) return false;
+        return true;
+      },
+    ).toList();
+    if (pedidos.isEmpty) return 'No registré ventas $titulo.';
+    var total = 0.0;
+    final unidades = <String, int>{};
+    for (final pedido in pedidos) {
+      total += pedido.montoTotal;
+      for (final item in pedido.items) {
+        unidades[item.nombre] = (unidades[item.nombre] ?? 0) + item.cantidad;
+      }
+    }
+    final masVendidos = unidades.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final buffer = StringBuffer(
+      'Vendiste ${_moneda(total)} $titulo, en ${pedidos.length} '
+      '${pedidos.length == 1 ? 'venta' : 'ventas'}.',
+    );
+    if (masVendidos.isNotEmpty) {
+      buffer.write(
+        ' Lo que más salió: ${masVendidos.take(3).map((e) => '${e.key} (${e.value})').join(', ')}.',
+      );
+    }
+    buffer.write(' El total usa el precio de venta actual de cada producto.');
+    return buffer.toString();
+  }
+
+  Future<String> _informeConsumo() async {
+    final resumen = await const MetricasAsistente().resumir();
+    if (resumen.turnos == 0) {
+      return 'Todavía no consulté al modelo desde este teléfono.';
+    }
+    final segundos = (resumen.msPromedio / 1000).toStringAsFixed(1);
+    return 'Consulté al modelo ${resumen.turnos} '
+        '${resumen.turnos == 1 ? 'vez' : 'veces'}: '
+        '${resumen.entrada} tokens de entrada (${resumen.enCache} en caché) y '
+        '${resumen.salida} de salida. Demora promedio $segundos s. '
+        '${resumen.utiles} de ${resumen.turnos} terminaron en un plan.';
+  }
+
   Future<String> _informeDeudas(AppDatabase database) async {
     final repo = CapitalRepository(database);
     final movimientos = await repo.listar();
@@ -396,44 +496,6 @@ class OrquestadorIa {
         '• Saldo a cobrar: ${_moneda(aCobrar)}.';
   }
 
-  Future<Interpretacion?> _ajusteLocal(
-    AppDatabase database,
-    String normalizado,
-  ) async {
-    final tipo = _tipoMovimiento(normalizado);
-    if (tipo == null) return null;
-    final mencionaStock = RegExp(
-      r'\b(stock|inventario|unidad|unidades|entrada|salida)\b',
-    ).hasMatch(normalizado);
-    final pareceAltaProducto =
-        RegExp(r'\b(producto|articulo|mercaderia)\b').hasMatch(normalizado);
-    if (!mencionaStock && pareceAltaProducto) return null;
-    final cantidadMatch = RegExp(r'\b(\d+)\b').firstMatch(normalizado);
-    final cantidad =
-        cantidadMatch == null ? null : int.tryParse(cantidadMatch.group(1)!);
-    final productos = await PedidoRepository(database).listarProductos();
-    final candidatos = productos
-        .where(
-          (producto) => normalizado.contains(normalizarTexto(producto.nombre)),
-        )
-        .toList()
-      ..sort((a, b) => b.nombre.length.compareTo(a.nombre.length));
-    final nombre = candidatos.isEmpty
-        ? _nombreDesdeAjuste(normalizado)
-        : candidatos.first.nombre;
-    return _enrutador.interpretarDatos(
-      database: database,
-      accion: 'ajustar_stock',
-      datos: {
-        'producto': nombre,
-        'cantidad': cantidad,
-        'tipo': tipo,
-        'propietario':
-            RegExp(r'\bnildo\b').hasMatch(normalizado) ? 'Nildo' : 'Yo',
-      },
-    );
-  }
-
   Map<String, dynamic>? _productoLocal(String normalizado) {
     if (!RegExp(
       r'\b(crear|crea|creame|agregar|agrega|alta|cargar|carga|registrar)\b',
@@ -484,10 +546,61 @@ bool _esInformeStock(String texto) {
     r'\b(que me queda poco|que queda poco|productos? bajos?|productos? agotados?|sin stock)\b',
   ).hasMatch(texto);
   final cantidad = RegExp(
-    r'\b(cuanto|cuanta|cuantos|cuantas|mostrar|mostrame|informe|listar|lista|ver|queda|quedan|hay|bajo|bajos|cero|agotado|agotados|sin stock)\b',
+    r'\b(cuanto|cuanta|cuantos|cuantas|mostrar|mostrame|informa|informame|informar|informe|decime|pasame|listar|lista|ver|queda|quedan|hay|bajo|bajos|cero|agotado|agotados|sin stock)\b',
   ).hasMatch(texto);
   return (stock && cantidad || stockBajo) && _tipoMovimiento(texto) == null;
 }
+
+enum PeriodoVentas { hoy, ayer, semana, mes }
+
+/// Lo que el asistente ofrece, según los interruptores de la página.
+String alcanceConFunciones(FuncionesAsistente funciones) {
+  final informes = <String>[
+    if (funciones.ventasHoy) 'ventas de hoy',
+    if (funciones.consultarStock) 'stock',
+    if (funciones.horarioDireccion) 'el horario y la dirección',
+    'deudas',
+    'pedidos',
+    'capital',
+  ];
+  final escritura = funciones.anotarVenta
+      ? 'También armo entradas de stock y ventas: te muestro el plan y recién guardo cuando confirmás.'
+      : 'También armo entradas de stock: te muestro el plan y recién guardo cuando confirmás.';
+  return 'Puedo informar ${informes.join(', ')}. $escritura';
+}
+
+/// "¿Cuánto vendí hoy?" se responde con la base, sin gastar el cupo.
+PeriodoVentas? periodoVentasDe(String texto) =>
+    _periodoVentas(normalizarTexto(texto));
+
+/// Una venta para anotar, sin una entrada de stock en la misma frase.
+bool ventaSola(String texto) {
+  if (clasificarIntencion(texto) != IntencionAsistente.venta) return false;
+  final plano = normalizarTexto(texto);
+  return !RegExp(r'\b(agrega\w*|suma\w*|entra\w*|carga\w*)\b').hasMatch(plano);
+}
+
+PeriodoVentas? _periodoVentas(String texto) {
+  final ventas = RegExp(
+    r'\b(cuanto vendi|que vendi|vendi algo|ventas|vendimos|facture|facturamos|como me fue|como vengo de ventas)\b',
+  ).hasMatch(texto);
+  if (!ventas) return null;
+  if (RegExp(r'\b(vendi|vende)\s+\d').hasMatch(texto)) return null;
+  if (RegExp(r'\bayer\b').hasMatch(texto)) return PeriodoVentas.ayer;
+  if (RegExp(r'\b(semana|semanal)\b').hasMatch(texto)) {
+    return PeriodoVentas.semana;
+  }
+  if (RegExp(r'\b(mes|mensual)\b').hasMatch(texto)) return PeriodoVentas.mes;
+  if (RegExp(r'\b(hoy|el dia)\b').hasMatch(texto)) return PeriodoVentas.hoy;
+  if (RegExp(r'\b(cuanto vendi|como me fue|ventas)\b').hasMatch(texto)) {
+    return PeriodoVentas.hoy;
+  }
+  return null;
+}
+
+bool _esInformeConsumo(String texto) => RegExp(
+      r'\b(tokens|consumo del asistente|cuanto gaste de ia|consumo de ia|cuanto gasta el asistente)\b',
+    ).hasMatch(texto);
 
 bool _esInformeDeudas(String texto) => RegExp(
       r'\b(deuda|deudas|deudor|deudores|deben|debe|a cobrar|saldo a cobrar)\b',
@@ -526,20 +639,17 @@ String? _tipoMovimiento(String texto) {
   return null;
 }
 
-String _nombreDesdeAjuste(String texto) {
-  var limpio = texto
-      .replaceAll(
-        RegExp(
-          r'\b(entrada|salida|entra\w*|suma\w*|agrega\w*|ingresa\w*|desconta\w*|resta\w*|saca\w*|retira\w*|stock|inventario|unidad|unidades|yo|mi|mis|mio|mios|mia|mias|nildo|de|del|al|a|para|en|por|favor)\b',
-        ),
-        ' ',
-      )
-      .replaceAll(RegExp(r'\b\d+\b'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  if (limpio.startsWith('el ')) limpio = limpio.substring(3);
-  if (limpio.startsWith('la ')) limpio = limpio.substring(3);
-  return limpio;
+/// "Crealos" o "esos que te pedí" no traen el producto. Se lee junto con la
+/// frase anterior.
+String fraseConAntecedente(String frase, String? anterior) {
+  final previo = anterior?.trim() ?? '';
+  if (previo.isEmpty) return frase;
+  final texto = normalizarTexto(frase);
+  final refiere = RegExp(
+    r'\b(esos|esas|eso|esa|este|esta|estos|estas|crealo|crealos|crealas|creame|aquel|aquellos|que te pedi|lo que te dije|el que te dije)\b',
+  ).hasMatch(texto);
+  if (!refiere || normalizarTexto(previo) == texto) return frase;
+  return '$previo. $frase';
 }
 
 Map<String, dynamic>? _extraerJson(String raw) {

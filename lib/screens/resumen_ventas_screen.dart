@@ -7,6 +7,7 @@ import '../models/pedido_estado.dart';
 import '../services/negocio_local.dart';
 import '../services/sesion_google.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 
 /// Resumen de ventas (RF 3.5).
 ///
@@ -30,6 +31,7 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
   String _filtroMedio = '';
   String _filtroProducto = '';
   String? _soloAutor;
+  String _codigoMoneda = monedaPorDefecto;
 
   @override
   void initState() {
@@ -60,6 +62,7 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
     try {
       final sesion = await AuthGoogle.instancia.leer();
       final negocio = await NegocioStore().leer();
+      final codigo = codigoMoneda(negocio?.moneda);
       final email = sesion?.email ?? '';
       final admin = negocio == null || _administraVentas(negocio, email);
       final datos = await ResumenVentasConsulta(db).cargar(
@@ -69,6 +72,7 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
       if (!mounted) return;
       setState(() {
         _datos = datos;
+        _codigoMoneda = codigo;
         _soloAutor = admin ? null : email;
         _cargando = false;
         _error = null;
@@ -295,7 +299,7 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            _usd(periodo.monto),
+            formatearMoneda(periodo.monto, _codigoMoneda),
             style: const TextStyle(
               color: AppColors.texto,
               fontWeight: FontWeight.w800,
@@ -309,7 +313,7 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'Ganancia ${_usd(periodo.ganancia)}',
+            'Ganancia ${formatearMoneda(periodo.ganancia, _codigoMoneda)}',
             style: const TextStyle(
               color: AppColors.primario,
               fontWeight: FontWeight.w700,
@@ -431,7 +435,7 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
                               ),
                             const SizedBox(height: 2),
                             Text(
-                              _usd(ventas[i].montoTotal),
+                              formatearMoneda(ventas[i].montoTotal, _codigoMoneda),
                               style: const TextStyle(
                                 color: AppColors.textoSuave,
                                 fontSize: 12,
@@ -446,7 +450,7 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
                                     MetaPedido.etiquetaMedio(ventas[i].medioPago),
                                   if (ventas[i].fiado) 'Fiado',
                                   if (ventas[i].ganancia != null)
-                                    'Ganancia ${_usd(ventas[i].ganancia!)}',
+                                    'Ganancia ${formatearMoneda(ventas[i].ganancia!, _codigoMoneda)}',
                                 ].join(' · '),
                                 style: const TextStyle(
                                   color: AppColors.textoSuave,
@@ -532,5 +536,3 @@ String _fechaCorta(DateTime fecha) {
   final local = fecha.toLocal();
   return '${local.day}/${local.month}/${local.year}';
 }
-
-String _usd(double valor) => 'USD ${valor.toStringAsFixed(2)}';

@@ -91,6 +91,13 @@ class IdsRemotos {
     });
   }
 
+  Future<void> olvidarTodo() {
+    return _enOrden(() async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_clave);
+    });
+  }
+
   Future<void> olvidar(String tabla, String claveLocal) {
     return _enOrden(() async {
       final doc = await _doc();

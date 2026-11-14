@@ -1,12 +1,14 @@
 import 'package:drift/drift.dart';
 
 import '../backend/clientes_remoto.dart';
+import '../backend/ids_remotos.dart';
 import '../backend/pedidos_remoto.dart';
 import '../backend/stock_remoto.dart';
 import '../models/pedido_estado.dart';
 import 'ampliacion_local.dart';
 import 'app_database.dart';
 import 'capital_repository.dart';
+import 'stock_pedido_web.dart';
 import 'stock_repository.dart';
 
 /// Total de un pedido: precio de venta por cantidad.
@@ -504,7 +506,11 @@ class PedidoRepository {
         }
 
         final yaDesconto = PedidoEstados.yaDescontoStock(pedido.estado);
-        if (destino.reservaStock && !yaDesconto) {
+        final yaAplicado = (await const AmpliacionLocal().cargar())
+                .pedidos[pedidoId]
+                ?.stockAplicado ==
+            true;
+        if (destino.reservaStock && !yaDesconto && !yaAplicado) {
           mutacion = await const AmpliacionLocal().prepararDescuento(pedidoId);
           await _descontarStock(pedidoId);
         }
@@ -512,6 +518,10 @@ class PedidoRepository {
             pedido.estado.trim().toLowerCase() ==
                 PedidoEstado.confirmado.texto) {
           mutacion = await const AmpliacionLocal().prepararDevolucion(pedidoId);
+          await _devolverStock(pedidoId);
+        } else if (destino == PedidoEstado.cancelado &&
+            yaAplicado &&
+            !yaDesconto) {
           await _devolverStock(pedidoId);
         }
 
@@ -1023,7 +1033,23 @@ class PedidoRepository {
                 m.tipo.equals(StockRepository.tipoSalida),
           ))
         .get();
-    if (movimientos.isEmpty) return;
+    final uuid = await const IdsRemotos().leer(IdsRemotos.pedido, '$pedidoId');
+    final web = (uuid == null || uuid.trim().isEmpty)
+        ? const <MovimientosStockData>[]
+        : await (db.select(db.movimientosStock)
+              ..where(
+                (m) =>
+                    m.descripcion.equals(StockPedidoWeb.descripcion(uuid)) &
+                    m.tipo.equals(StockRepository.tipoSalida),
+              ))
+            .get();
+    final vistos = movimientos.map((movimiento) => movimiento.id).toSet();
+    final porDevolver = [
+      ...movimientos,
+      for (final movimiento in web)
+        if (vistos.add(movimiento.id)) movimiento,
+    ];
+    if (porDevolver.isEmpty) return;
 
     final productos = await stock.obtenerProductos();
     final nombres = <int, String>{
@@ -1031,7 +1057,7 @@ class PedidoRepository {
         if (producto.id != null) producto.id!: producto.nombre,
     };
 
-    for (final movimiento in movimientos) {
+    for (final movimiento in porDevolver) {
       final propietario = await _propietarioDe(movimiento.usuarioId);
       final nombre =
           nombres[movimiento.productoId] ?? 'Producto ${movimiento.productoId}';

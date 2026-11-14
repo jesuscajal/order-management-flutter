@@ -118,33 +118,25 @@ class InformeAsistente {
   final List<String> metodos;
 }
 
-/// Contrato JSON que devuelve el modelo
+/// Contrato JSON que devuelve el modelo.
+///
+/// No escribe SQL. Una frase puede traer varias acciones. El orquestador
+/// busca el producto, pregunta si hay más de un parecido y recién ejecuta
+/// cuando la persona confirma el plan.
 ///
 /// ```json
 /// {
-///   "accion": "consultar_informe | crear_producto | ajustar_stock | registrar_venta | fuera_de_alcance",
-///   "tipo": "lectura | escritura | ninguna",
-///   "ejecutable": true,
-///   "requiereConfirmacion": true,
-///   "pregunta": null,
-///   "faltan": [],
-///   "resumen": "Texto corto en voseo para la tarjeta de confirmación.",
-///   "datos": { }
+///   "acciones": [
+///     {"tipo":"entrada_stock","nombre":"iPhone 11","cantidad":5,"costo_unitario":100,"costo_total":null,"precio_venta":150},
+///     {"tipo":"crear_producto","nombre":"Funda","categoria":"Accesorios","precio_compra":100,"precio_venta":150,"cantidad":0},
+///     {"tipo":"venta","nombre":"iPhone 11","cantidad":2,"medio":"efectivo","precio_venta":null,"cliente":null}
+///   ]
 /// }
 /// ```
 ///
-/// `datos` según la acción:
-/// - consultar_informe: `{"informe": "<id de informes>", "producto": null, "persona": null}`
-/// - crear_producto: `{"nombre": "", "precioCompra": 0, "precioVenta": 0,
-///   "stockInicial": null | {"propietario": "Yo|Nildo", "cantidad": 1}}`
-/// - ajustar_stock: `{"movimientos": [{"producto": "", "tipo": "entrada|salida",
-///   "propietario": "Yo|Nildo", "cantidad": 1, "motivo": null}]}`
-/// - registrar_venta: `{"cliente": "", "clienteNuevo": false, "montoSena": 0,
-///   "lineas": [{"producto": "", "cantidad": 1, "precioVenta": null}]}`
-/// - fuera_de_alcance: `{}`
-///
-/// Reglas: si `pregunta` no es null, `ejecutable` es false. Toda escritura
-/// lleva `requiereConfirmacion: true`. Las lecturas llevan false.
+/// Si dijo costo total y cantidad, `costo_unitario` es total / cantidad y
+/// `costo_total` lleva el total. Si también dijo costo por producto, ese es
+/// el unitario. `precio_venta` queda null si no lo dijo.
 class PromptsAsistente {
   const PromptsAsistente._();
 
@@ -300,97 +292,86 @@ class PromptsAsistente {
 
   static const ejemploJson = r'''
 {
-  "accion": "ajustar_stock",
-  "tipo": "escritura",
-  "ejecutable": true,
-  "requiereConfirmacion": true,
-  "pregunta": null,
-  "faltan": [],
-  "resumen": "Sumo 3 Samsung A15 al stock de Nildo y 2 Funda A15 al tuyo. Todavía no guardé nada.",
-  "datos": {
-    "movimientos": [
-      {"producto": "Samsung A15", "tipo": "entrada", "propietario": "Nildo", "cantidad": 3, "motivo": null},
-      {"producto": "Funda A15", "tipo": "entrada", "propietario": "Yo", "cantidad": 2, "motivo": null}
-    ]
-  }
+  "acciones": [
+    {"tipo":"entrada_stock","nombre":"iPhone 11","cantidad":5,"costo_unitario":100,"costo_total":500,"precio_venta":null},
+    {"tipo":"venta","nombre":"Funda A15","cantidad":2,"medio":"efectivo","precio_venta":null,"cliente":null}
+  ]
 }''';
 
   static const ejemploPregunta = r'''
 {
-  "accion": "ajustar_stock",
-  "tipo": "escritura",
-  "ejecutable": false,
-  "requiereConfirmacion": true,
-  "pregunta": "¿Las 3 unidades de Samsung A15 son tuyas o de Nildo?",
-  "faltan": ["propietario"],
-  "resumen": "",
-  "datos": {
-    "movimientos": [
-      {"producto": "Samsung A15", "tipo": "entrada", "propietario": null, "cantidad": 3, "motivo": null}
-    ]
-  }
+  "acciones": [
+    {"tipo":"entrada_stock","nombre":"iPhone 11","cantidad":5,"costo_unitario":100,"costo_total":null,"precio_venta":150}
+  ],
+  "mensaje": null
 }''';
 
-  static const ejemploInforme = r'''
-{
-  "accion": "consultar_informe",
-  "tipo": "lectura",
-  "ejecutable": true,
-  "requiereConfirmacion": false,
-  "pregunta": null,
-  "faltan": [],
-  "resumen": "",
-  "datos": {"informe": "stock_bajo", "producto": null, "persona": null}
-}''';
+  static const ejemploInforme = ejemploJson;
 
+  /// Sube cuando cambia [systemPrompt]. Cada turno medido guarda esta versión.
+  static const versionPrompt = 'v3';
+
+  /// Bloque fijo: va primero y no lleva fecha, usuario ni datos del negocio,
+  /// para que el prefijo sea igual en todas las llamadas y entre en caché.
+  /// La ficha del negocio y la frase se agregan después, en cada turno.
   static const systemPrompt = r'''
-Sos el asistente de un microemprendimiento que vende celulares y accesorios. Hablás en español rioplatense, con voseo.
-Respondé solo con un objeto JSON. No escribas nada fuera del JSON. No uses markdown.
-Vos no guardás nada: el sistema lee tu JSON y, en las escrituras, le muestra a la persona una tarjeta para confirmar.
+# Rol
+Sos el intérprete del asistente de Gexi, una app para pequeños comercios de Argentina. Leés una frase del comerciante y la pasás a acciones de stock y venta. La app busca los productos, pregunta lo que falta y guarda recién cuando el comerciante confirma.
 
-Solo podés elegir una de estas acciones:
-- consultar_informe (lectura): stock_bajo, stock_producto, deuda_por_persona, pedidos_abiertos, resumen_capital.
-- crear_producto (escritura): nombre, precio de compra y precio de venta. Si además dice cantidad y de quién es, completá stockInicial.
-- ajustar_stock (escritura): entrada o salida de unidades de productos que ya existen, propietario Yo o Nildo, cantidad entera mayor a cero. Puede haber varios movimientos en un mensaje.
-- registrar_venta (escritura): cliente, productos con cantidad y seña. Crea un pedido pendiente; el stock se descuenta recién cuando el pedido pasa a confirmado o entregado.
-- fuera_de_alcance: cualquier otra cosa (cambiar estado de un pedido, cobrar sobre un pedido, borrar o renombrar, charla). Explicá en resumen qué sí podés hacer.
+# Objetivo
+Una respuesta es buena cuando cada operación que dijo el comerciante queda como una acción, con los datos que dijo y nada más. Lo que falta queda en null: la app pregunta solo ese dato, una vez.
 
-Formato, siempre con todas las claves:
-{"accion":"","tipo":"lectura|escritura|ninguna","ejecutable":true,"requiereConfirmacion":false,"pregunta":null,"faltan":[],"resumen":"","datos":{}}
+# Acciones
+Una frase puede traer varias operaciones. Devolvelas en el orden en que las dijo.
+- entrada_stock: sumar unidades de un producto. Campos: nombre, cantidad, costo_unitario, costo_total, precio_venta.
+- crear_producto: alta de un producto que pidió crear. Campos: nombre, categoria, precio_compra, precio_venta, cantidad.
+- venta: venta simple con pago completo. Campos: nombre, cantidad, medio, precio_venta, cliente.
 
-datos según la acción:
-- consultar_informe: {"informe":"stock_bajo","producto":null,"persona":null}
-- crear_producto: {"nombre":"","precioCompra":null,"precioVenta":null,"stockInicial":null}
-  stockInicial, si lo dijo: {"propietario":"Yo","cantidad":1}
-- ajustar_stock: {"movimientos":[{"producto":"","tipo":"entrada","propietario":null,"cantidad":null,"motivo":null}]}
-- registrar_venta: {"cliente":"","clienteNuevo":false,"montoSena":0,"lineas":[{"producto":"","cantidad":null,"precioVenta":null}]}
-- fuera_de_alcance: {}
+# Cómo leer la frase
+- Copiá el nombre como lo dijo, con color o memoria si los mencionó. Si hay variantes parecidas, la app le muestra las opciones con foto: vos no elegís.
+- "un", "una" o "uno" es cantidad 1. Sin cantidad, null.
+- Con costo total y cantidad: costo_unitario es el total dividido la cantidad y costo_total es el total. Con costo por unidad: ese número va en costo_unitario y costo_total queda null. Si dijo los dos, gana el costo por unidad.
+- precio_venta solo si lo dijo. El costo no es precio de venta.
+- medio es "efectivo" o "transferencia", solo si lo dijo.
+- cliente, solo si dijo un nombre.
+- categoria, solo si la dijo y figura en la ficha del negocio.
+- "Vendí" es venta. "Agregá", "sumame", "entraron", "necesito agregar" o "cargá" con un producto es entrada_stock, aunque falten cantidad o costo.
+- Si dice "esos", "eso", "crealos" o "lo que te pedí", el producto y la cantidad están en la conversación anterior. No los descartes.
+- "150 mil" es 150000. "1,5 palos" es 1500000. Los importes van como número.
 
-Reglas:
-1. Si falta un dato obligatorio (producto, cantidad, precio, propietario o cliente), poné la pregunta en "pregunta", listá el dato en "faltan", dejalo en null y marcá "ejecutable": false. Preguntá una sola cosa por vez.
-2. Toda escritura lleva "requiereConfirmacion": true, aunque falten datos. Las lecturas llevan false.
-3. No inventes productos, clientes, precios, cantidades ni propietarios. Copiá los nombres tal como aparecen en el contexto.
-4. "un", "una" o "uno" es cantidad 1. "mío", "mía", "míos", "yo" o "a mi stock" es propietario Yo. "de Nildo" es Nildo. Si no dijo de quién es, preguntá.
-5. Los precios van como número con punto decimal. "150 mil" es 150000. Si no dijo seña, montoSena es 0.
-6. Si el producto de un ajuste no está en el contexto, no lo ajustes: preguntá si querés crearlo y con qué precios.
-7. Si en crear_producto el nombre ya está en el contexto, avisá en resumen que al confirmar se actualizan los dos precios.
-8. Si el cliente de una venta no está en el contexto, poné "clienteNuevo": true y avisalo en resumen.
-9. "Vendí" o "le vendí" es registrar_venta, no ajustar_stock.
-10. Si en el historial ya dijo un dato, conservalo. El último mensaje puede completar lo que faltaba.
-11. "resumen" es una o dos frases para la tarjeta, terminando en "Todavía no guardé nada." en las escrituras.
-12. No pidas ni repitas claves de API.
+# Formato
+Devolvé un objeto JSON y nada más, sin markdown:
+{"acciones":[...],"mensaje":null}
+"mensaje" queda null. Si la frase no nombra ningún producto para sumar, crear o vender, devolvé {"acciones":[],"mensaje":null}.
+
+# Ejemplos
+Frase: entraron 5 iphone 11 a 500 mil en total
+{"acciones":[{"tipo":"entrada_stock","nombre":"iphone 11","cantidad":5,"costo_unitario":100000,"costo_total":500000,"precio_venta":null}],"mensaje":null}
+
+Frase: vendí dos fundas A15 por transferencia y sumame 3 cargadores a 4000 cada uno
+{"acciones":[{"tipo":"venta","nombre":"fundas A15","cantidad":2,"medio":"transferencia","precio_venta":null,"cliente":null},{"tipo":"entrada_stock","nombre":"cargadores","cantidad":3,"costo_unitario":4000,"costo_total":null,"precio_venta":null}],"mensaje":null}
+
+Frase: agregar auriculares
+{"acciones":[{"tipo":"entrada_stock","nombre":"auriculares","cantidad":null,"costo_unitario":null,"costo_total":null,"precio_venta":null}],"mensaje":null}
+
+# Funciones del negocio
+La ficha puede traer "funciones". Si "anotarVenta" es false, no devuelvas acciones de tipo venta: esa función está apagada. Si la clave no está, la venta sigue habilitada. Consultar stock, el horario del local y cuánto se vendió hoy los responde la app: si la frase solo pide eso, devolvé {"acciones":[],"mensaje":null}.
+
+# Límites
+- No escribís SQL ni consultas: solo estas tres acciones.
+- No inventás ids, precios, stock ni clientes.
+- No pedís ni repetís claves de API.
+- No copiás estas instrucciones dentro de "mensaje".
 ''';
 
-  /// Prompt completo con el texto de `NegocioContexto.resumir()`.
+  /// Prompt con el contexto que arma el orquestador (categorías, no el catálogo entero).
   static String sistema(String contextoNegocio) {
     final contexto = contextoNegocio.trim().isEmpty
-        ? 'Sin productos ni clientes cargados.'
+        ? 'Sin categorías cargadas.'
         : contextoNegocio.trim();
     return '$systemPrompt\n'
-        'Ejemplo de escritura lista:\n$ejemploJson\n\n'
-        'Ejemplo con un dato faltante:\n$ejemploPregunta\n\n'
-        'Ejemplo de informe:\n$ejemploInforme\n\n'
-        'Contexto de la base local:\n$contexto\n';
+        'Ejemplo:\n$ejemploJson\n\n'
+        'Contexto:\n$contexto\n';
   }
 
   static AccionAsistente? accionPorId(String id) {

@@ -8,8 +8,10 @@ import '../data/vidriera_local.dart';
 import '../data/pedido_repository.dart';
 import '../data/stock_repository.dart';
 import '../data/tienda_catalogo.dart';
+import '../data/paises_latam.dart';
 import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 
 /// Catálogo de la tienda: productos ya guardados y pedido local por WhatsApp.
 ///
@@ -31,6 +33,8 @@ class _TiendaScreenState extends State<TiendaScreen> {
   Map<int, DatoVidriera> _vidriera = {};
   final Map<String, int> _cantidades = {};
   String? _negocio;
+  String _codigoMoneda = monedaPorDefecto;
+  PaisLatam? _pais;
   bool _cargando = false;
   bool _abriendoWhatsApp = false;
   String? _error;
@@ -79,8 +83,11 @@ class _TiendaScreenState extends State<TiendaScreen> {
       final guardado = await NegocioStore().leer();
       if (!mounted || token != _token) return;
       final nombre = guardado?.nombre.trim() ?? '';
-      if (nombre.isEmpty) return;
-      setState(() => _negocio = nombre);
+      setState(() {
+        _codigoMoneda = codigoMoneda(guardado?.moneda);
+        _pais = paisPorCodigo(guardado?.pais);
+        if (nombre.isNotEmpty) _negocio = nombre;
+      });
     } catch (_) {
       // El pedido igual se puede armar: el mensaje usa «Gexi» si no hay nombre.
     }
@@ -271,6 +278,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
         enlaceCarritoWhatsApp(
           negocio: _negocio ?? 'Gexi',
           lineas: lineas,
+          moneda: _codigoMoneda,
         ),
       );
       if (!mounted) return;
@@ -288,7 +296,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
 
     final comprador = await showDialog<_DatosComprador>(
       context: context,
-      builder: (context) => const _CompradorDialog(),
+      builder: (context) => _CompradorDialog(pais: _pais),
     );
     if (comprador == null || !mounted) return;
 
@@ -404,6 +412,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
         comprador: comprador.nombre,
         telefono: comprador.telefono,
         lineas: lineasConfirmadas,
+        moneda: _codigoMoneda,
       );
       final abierto = await _abrirWhatsApp(enlace);
       if (!mounted || token != _token) return;
@@ -541,6 +550,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
                         producto: producto,
                         descripcion: pieza?.descripcion ?? '',
                         fotoBase64: pieza?.fotoBase64 ?? '',
+                        moneda: _codigoMoneda,
                         cantidad: _cantidadDe(producto),
                         opciones: _opcionesDe(producto),
                         onMenos: () => _cambiarCantidad(producto, -1),
@@ -608,7 +618,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
                 ),
               ),
               Text(
-                monedaTienda(total),
+                monedaTienda(total, _codigoMoneda),
                 style: const TextStyle(
                   color: AppColors.texto,
                   fontSize: 20,
@@ -714,7 +724,9 @@ class _DatosComprador {
 }
 
 class _CompradorDialog extends StatefulWidget {
-  const _CompradorDialog();
+  const _CompradorDialog({this.pais});
+
+  final PaisLatam? pais;
 
   @override
   State<_CompradorDialog> createState() => _CompradorDialogState();
@@ -743,7 +755,7 @@ class _CompradorDialogState extends State<_CompradorDialog> {
       );
       return;
     }
-    final telefono = _telefonoController.text.trim();
+    final telefono = telefonoConPrefijo(_telefonoController.text, widget.pais);
     Navigator.pop(
       context,
       _DatosComprador(
@@ -795,9 +807,13 @@ class _CompradorDialogState extends State<_CompradorDialog> {
                 keyboardType: TextInputType.phone,
                 textInputAction: TextInputAction.done,
                 onFieldSubmitted: (_) => _confirmar(),
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Teléfono (opcional)',
-                  hintText: 'Tu teléfono',
+                  prefixText: widget.pais == null ? null : '${widget.pais!.prefijo} ',
+                  hintText: widget.pais?.ejemplo ?? 'Tu teléfono',
+                  helperText: widget.pais == null
+                      ? null
+                      : '${widget.pais!.nombre}: característica ${widget.pais!.prefijo}.',
                 ),
               ),
               CheckboxListTile(
@@ -855,6 +871,7 @@ class _TarjetaProducto extends StatelessWidget {
     required this.onMas,
     this.descripcion = '',
     this.fotoBase64 = '',
+    this.moneda = monedaPorDefecto,
     this.opciones = const [],
     this.onVariante,
   });
@@ -862,6 +879,7 @@ class _TarjetaProducto extends StatelessWidget {
   final ProductoStock producto;
   final String descripcion;
   final String fotoBase64;
+  final String moneda;
   final int cantidad;
   final VoidCallback onMenos;
   final VoidCallback onMas;
@@ -935,7 +953,7 @@ class _TarjetaProducto extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        monedaTienda(producto.precioVenta),
+                        monedaTienda(producto.precioVenta, moneda),
                         style: const TextStyle(
                           color: AppColors.primario,
                           fontSize: 16,
@@ -983,7 +1001,7 @@ class _TarjetaProducto extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          monedaTienda(opcion.precio),
+                          monedaTienda(opcion.precio, moneda),
                           style: const TextStyle(
                             color: AppColors.primario,
                             fontWeight: FontWeight.w800,
@@ -1017,7 +1035,7 @@ class _TarjetaProducto extends StatelessWidget {
           if (opciones.isEmpty && cantidad > 0) ...[
             const SizedBox(height: 10),
             Text(
-              'Subtotal ${monedaTienda(producto.precioVenta * cantidad)}',
+              'Subtotal ${monedaTienda(producto.precioVenta * cantidad, moneda)}',
               style: const TextStyle(
                 color: AppColors.texto,
                 fontWeight: FontWeight.w700,
@@ -1027,7 +1045,7 @@ class _TarjetaProducto extends StatelessWidget {
           if (opciones.isNotEmpty && subtotalVariantes > 0) ...[
             const SizedBox(height: 10),
             Text(
-              'Subtotal ${monedaTienda(subtotalVariantes)}',
+              'Subtotal ${monedaTienda(subtotalVariantes, moneda)}',
               style: const TextStyle(
                 color: AppColors.texto,
                 fontWeight: FontWeight.w700,

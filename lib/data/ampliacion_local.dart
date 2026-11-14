@@ -205,6 +205,7 @@ class MetaPedido {
   const MetaPedido({
     this.origen = 'local',
     this.autor = '',
+    this.cobradoPor = '',
     this.precios = const {},
     this.comprobante = '',
     this.comprobanteEstado = '',
@@ -220,7 +221,12 @@ class MetaPedido {
   static const medios = ['efectivo', 'transferencia', 'otro'];
 
   final String origen;
+
+  /// Cuenta que cargó la venta.
   final String autor;
+
+  /// Cuentas que registraron un cobro, separadas por " · ".
+  final String cobradoPor;
   final Map<int, double> precios;
 
   /// Imagen en base64, sin encabezado. Vacío si no hay comprobante.
@@ -306,6 +312,7 @@ class MetaPedido {
   MetaPedido copiar({
     String? origen,
     String? autor,
+    String? cobradoPor,
     Map<int, double>? precios,
     String? comprobante,
     String? comprobanteEstado,
@@ -320,6 +327,7 @@ class MetaPedido {
     return MetaPedido(
       origen: origen ?? this.origen,
       autor: autor ?? this.autor,
+      cobradoPor: cobradoPor ?? this.cobradoPor,
       precios: precios ?? this.precios,
       comprobante: comprobante ?? this.comprobante,
       comprobanteEstado: comprobanteEstado ?? this.comprobanteEstado,
@@ -336,6 +344,7 @@ class MetaPedido {
   Map<String, dynamic> toJson() => {
         'origen': origen,
         'autor': autor,
+        'cobradoPor': cobradoPor,
         'precios': {
           for (final entrada in precios.entries)
             entrada.key.toString(): entrada.value,
@@ -366,6 +375,7 @@ class MetaPedido {
     return MetaPedido(
       origen: json['origen'] as String? ?? 'local',
       autor: json['autor'] as String? ?? '',
+      cobradoPor: json['cobradoPor'] as String? ?? '',
       precios: precios,
       comprobante: json['comprobante'] as String? ?? '',
       comprobanteEstado: json['comprobanteEstado'] as String? ?? '',
@@ -504,6 +514,13 @@ class AmpliacionLocal {
     }
   }
 
+  /// Deja las fichas en el teléfono sin volver a publicarlas.
+  /// La sincronización la usa para bajar el stock que ya descontó la página.
+  Future<void> guardarFichasSinSubir(Map<int, FichaProducto> fichas) async {
+    final actual = await cargar();
+    await _escribir(actual, fichas: fichas);
+  }
+
   Future<void> guardarFicha(int productoId, FichaProducto ficha) async {
     final actual = await cargar();
     final fichas = Map<int, FichaProducto>.of(actual.fichas);
@@ -560,6 +577,41 @@ class AmpliacionLocal {
         medioPago: guardada.medioPago,
         fiado: guardada.fiado,
       ),
+    );
+  }
+
+  /// El pedido web ya descontó stock en la nube. Confirmar no lo vuelve a bajar.
+  Future<void> anotarStockAplicado(int pedidoId) async {
+    final actual = await cargar();
+    final previa = actual.pedidos[pedidoId];
+    if (previa != null && previa.stockAplicado) return;
+    final pedidos = Map<int, MetaPedido>.of(actual.pedidos);
+    pedidos[pedidoId] = (previa ?? const MetaPedido(origen: 'tienda'))
+        .copiar(stockAplicado: true);
+    await _escribir(actual, pedidos: pedidos);
+  }
+
+  /// Anota quién registró un cobro. Si ya estaba, no lo repite.
+  Future<void> anotarCobro(int pedidoId) async {
+    final actual = await cargar();
+    final previa = actual.pedidos[pedidoId];
+    if (previa == null) return;
+    final sesion = await AuthGoogle.instancia.leer();
+    final actor = sesion?.email.trim() ?? '';
+    if (actor.isEmpty) return;
+    final partes = previa.cobradoPor
+        .split(' · ')
+        .map((parte) => parte.trim())
+        .where((parte) => parte.isNotEmpty)
+        .toList();
+    if (!partes.contains(actor)) partes.add(actor);
+    final pedidos = Map<int, MetaPedido>.of(actual.pedidos);
+    pedidos[pedidoId] = previa.copiar(cobradoPor: partes.join(' · '));
+    await _escribir(actual, pedidos: pedidos);
+    await anotar(
+      accion: 'cobro',
+      entidad: 'pedido',
+      detalle: 'Cobro del pedido #$pedidoId',
     );
   }
 
@@ -800,6 +852,7 @@ class AmpliacionLocal {
             if (variante.etiqueta.trim().isNotEmpty)
               VarianteParaNube(
                 etiqueta: variante.etiqueta,
+                stock: variante.stock < 0 ? 0 : variante.stock,
                 precio: variante.precio,
               ),
         ],
@@ -811,6 +864,64 @@ class AmpliacionLocal {
         atributos: ficha.atributos,
       ),
     );
+  }
+
+  Future<String?> copia() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_clave);
+  }
+
+  Future<void> restaurar(String? crudo) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (crudo == null || crudo.isEmpty) {
+      await prefs.remove(_clave);
+      return;
+    }
+    await prefs.setString(_clave, crudo);
+  }
+
+  /// Multiplica precios de variantes, líneas de pedido y descuentos en monto.
+  Future<void> convertirMontos(double Function(double valor) convertir) async {
+    final actual = await cargar();
+    final fichas = <int, FichaProducto>{
+      for (final entrada in actual.fichas.entries)
+        entrada.key: entrada.value.copiar(
+          variantes: [
+            for (final variante in entrada.value.variantes)
+              VarianteLocal(
+                etiqueta: variante.etiqueta,
+                stock: variante.stock,
+                precio: variante.precio == null
+                    ? null
+                    : convertir(variante.precio!),
+              ),
+          ],
+        ),
+    };
+    final pedidos = <int, MetaPedido>{
+      for (final entrada in actual.pedidos.entries)
+        entrada.key: entrada.value.copiar(
+          precios: {
+            for (final precio in entrada.value.precios.entries)
+              precio.key: convertir(precio.value),
+          },
+          lineas: [
+            for (final linea in entrada.value.lineas)
+              LineaMeta(
+                productoId: linea.productoId,
+                cantidad: linea.cantidad,
+                precio: convertir(linea.precio),
+                unidad: linea.unidad,
+                variante: linea.variante,
+              ),
+          ],
+          descuentoValor: entrada.value.descuentoTipo == 'monto'
+              ? convertir(entrada.value.descuentoValor)
+              : entrada.value.descuentoValor,
+          descuentoMonto: convertir(entrada.value.descuentoMonto),
+        ),
+    };
+    await _escribir(actual, fichas: fichas, pedidos: pedidos);
   }
 
   Future<void> _escribir(

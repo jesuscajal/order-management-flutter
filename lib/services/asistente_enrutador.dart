@@ -11,8 +11,8 @@ import 'openai_chat_service.dart';
 enum IntencionAsistente { venta, producto, ajusteStock, stock, fuera }
 
 const alcanceAsistente =
-    'Puedo informar stock, deudas, pedidos y capital; crear productos, '
-    'ajustar stock y registrar ventas.';
+    'Puedo informar ventas, stock, deudas, pedidos y capital. '
+    'También armo entradas de stock y ventas: te muestro el plan y recién guardo cuando confirmás.';
 
 const mensajeSinCupo = 'Se acabaron los mensajes de prueba.';
 
@@ -48,7 +48,9 @@ IntencionAsistente clasificarIntencion(String texto) {
 
 String respuestaFueraDeAlcance(String texto) {
   if (mencionaFoto(texto)) {
-    return '$alcanceAsistente La carga por foto queda fuera de este prototipo.';
+    return 'Cuando das de alta un producto para la página, en el plan te pido una foto. '
+        'Si no tenés, la genero con fondo blanco para la web. '
+        'Escribí el alta con el nombre, la categoría y los precios.';
   }
   return alcanceAsistente;
 }
@@ -76,7 +78,10 @@ bool esAfirmacion(String texto) {
 /// Charla que no completa una venta ni un producto, aunque haya un borrador abierto.
 bool esTemaFuera(String texto) {
   final t = _clave(texto);
-  if (mencionaFoto(texto)) return true;
+  if (mencionaFoto(texto) &&
+      clasificarIntencion(texto) == IntencionAsistente.fuera) {
+    return true;
+  }
   return RegExp(
     r'\b(chiste|clima|pronostico|capital|deuda|deudores|dolar|bitcoin|btc|hola|buenas|buenos dias|gracias|chau|adios|ayuda|quien sos|que podes|cotizacion|factura)\b',
   ).hasMatch(t);

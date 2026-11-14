@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../data/app_database.dart';
 import '../data/capital_repository.dart';
+import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 
 /// Movimientos de capital (RF-019, RF-021 y RF-022).
 ///
@@ -41,10 +43,12 @@ class _CapitalScreenState extends State<CapitalScreen> {
   List<MovimientoCapitalRegistro> _movimientosDb = [];
   bool _cargando = false;
   String _periodo = 'todo';
+  String _codigoMoneda = monedaPorDefecto;
 
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     if (widget.database == null) {
       _movimientosMemoria = _ejemplos();
     } else {
@@ -59,6 +63,12 @@ class _CapitalScreenState extends State<CapitalScreen> {
     if (oldWidget.database != widget.database && widget.database != null) {
       _cargar(mostrarCarga: true);
     }
+  }
+
+  Future<void> _leerMoneda() async {
+    final codigo = await monedaDelNegocio();
+    if (!mounted || codigo == _codigoMoneda) return;
+    setState(() => _codigoMoneda = codigo);
   }
 
   List<Map<String, dynamic>> _ejemplos() {
@@ -282,7 +292,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
                     TextField(
                       controller: montoController,
                       decoration:
-                          const InputDecoration(labelText: 'Monto (USDT)'),
+                          InputDecoration(labelText: 'Monto ($_codigoMoneda)'),
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
@@ -416,7 +426,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
   _FilaMovimiento _filaMemoria(Map<String, dynamic> mov) {
     final monto = (mov['monto'] as num).toDouble();
     final tipo = TiposCapital.normalizar(mov['tipo'] as String);
-    final texto = '${CapitalRepository.textoMonto(monto.abs())} USDT';
+    final texto = formatearMoneda(monto.abs(), _codigoMoneda);
     final String montoTexto;
     switch (tipo) {
       case TiposCapital.entrada:
@@ -438,7 +448,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
 
   _FilaMovimiento _filaBase(MovimientoCapitalRegistro mov) {
     final tipo = TiposCapital.normalizar(mov.tipo);
-    final texto = '${CapitalRepository.textoMonto(mov.monto.abs())} USDT';
+    final texto = formatearMoneda(mov.monto.abs(), _codigoMoneda);
     final String montoTexto;
     switch (tipo) {
       case TiposCapital.entrada:
@@ -485,7 +495,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
           const SizedBox(width: 12),
           Flexible(
             child: Text(
-              '${CapitalRepository.textoMonto(valor)} USDT',
+              formatearMoneda(valor, _codigoMoneda),
               textAlign: TextAlign.end,
               style: color == null ? estilo : estilo?.copyWith(color: color),
             ),

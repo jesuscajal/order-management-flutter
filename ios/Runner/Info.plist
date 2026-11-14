@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Gexi usa la cámara para fotografiar productos y stock.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Gexi usa la galería para elegir fotos de productos y stock.</string>
 </dict>
 </plist>

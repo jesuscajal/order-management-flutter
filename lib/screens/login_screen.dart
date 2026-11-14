@@ -27,6 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _entrando = false;
   bool _porCorreo = false;
   bool _verClave = false;
+  bool _creando = false;
   String? _error;
 
   @override
@@ -46,6 +47,8 @@ class _LoginScreenState extends State<LoginScreen> {
       final sesion = await AuthGoogle.instancia.entrar();
       if (!mounted) return;
       if (sesion != null) widget.alEntrar(sesion);
+    } on SesionRemotaException catch (error) {
+      _avisar(error.mensaje);
     } catch (error) {
       final texto = error.toString();
       if (texto.contains('ClientID') || texto.contains('client_id')) {
@@ -134,38 +137,54 @@ class _LoginScreenState extends State<LoginScreen> {
 
   List<Widget> _contenido(ThemeData tema) {
     return [
-                  const Center(child: LogoGexi(ancho: 176)),
-                  const SizedBox(height: 4),
-                  Text.rich(
-                    TextSpan(
+                  const Center(child: LogoGexi(ancho: 140)),
+                  const SizedBox(height: 2),
+                  if (_creando) ...[
+                    Text(
+                      'Creá tu cuenta',
+                      textAlign: TextAlign.center,
                       style: tema.textTheme.headlineSmall?.copyWith(
                         color: const Color(0xFF0E3154),
                         fontWeight: FontWeight.w800,
                         height: 1.15,
                         letterSpacing: -0.4,
                       ),
-                      children: const [
-                        TextSpan(text: 'Gestión inteligente\npara '),
-                        TextSpan(
-                          text: 'crecer',
-                          style: TextStyle(color: Color(0xFF16C96A)),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Con Google o con tu correo. Si la cuenta ya existe, entrás directo.',
+                      textAlign: TextAlign.center,
+                      style: tema.textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF6B7280),
+                        height: 1.3,
+                      ),
+                    ),
+                  ] else
+                    Text.rich(
+                      TextSpan(
+                        style: tema.textTheme.headlineSmall?.copyWith(
+                          color: const Color(0xFF0E3154),
+                          fontWeight: FontWeight.w800,
+                          height: 1.15,
+                          letterSpacing: -0.4,
                         ),
-                      ],
+                        children: const [
+                          TextSpan(
+                            text: 'Impulsa tu negocio\ncon gestión inteligente.\nCrea, vende, ',
+                          ),
+                          TextSpan(
+                            text: 'crece.',
+                            style: TextStyle(color: Color(0xFF16C96A)),
+                          ),
+                        ],
+                      ),
+                      textAlign: TextAlign.center,
                     ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'La plataforma todo en uno para\nmicroemprendedores y pequeños\nnegocios.',
-                    textAlign: TextAlign.center,
-                    style: tema.textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFF6B7280),
-                      height: 1.35,
-                    ),
-                  ),
+                  if (!_creando) ...[
+                    const SizedBox(height: 10),
+                    const _Modulos(),
+                  ],
                   const SizedBox(height: 12),
-                  const _Modulos(),
-                  const SizedBox(height: 14),
                   _Campo(
                     controller: _correo,
                     hint: 'Correo electrónico',
@@ -173,7 +192,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     teclado: TextInputType.emailAddress,
                     accion: TextInputAction.next,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   _Campo(
                     controller: _clave,
                     hint: 'Contraseña',
@@ -197,53 +216,55 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13),
                     ),
                   ],
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _BotonContinuar(
+                    texto: _creando ? 'Crear cuenta  →' : 'Continuar  →',
                     cargando: _porCorreo,
                     alPulsar: _entrando ? null : _continuar,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   _BotonGoogle(
+                    texto: _creando ? 'Crear cuenta con Google' : 'Ingresar con Google',
                     cargando: _entrando && !_porCorreo,
                     alPulsar: _entrando ? null : _conGoogle,
                   ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Al continuar aceptás que Gexi use tu correo para el negocio. Tus datos quedan en este dispositivo.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Color(0xFF6B7280), fontSize: 12, height: 1.35),
-                  ),
-                  const SizedBox(height: 6),
-                  TextButton(
-                    onPressed: _entrando
-                        ? null
-                        : () => _avisar(
-                              'En este prototipo no enviamos correos. Entrá con Continuar usando el correo que quieras.',
-                            ),
-                    child: const Text(
-                      '¿Olvidaste tu contraseña?',
-                      style: TextStyle(
-                        color: Color(0xFF2F6BFF),
-                        fontWeight: FontWeight.w600,
+                  const SizedBox(height: 4),
+                  if (!_creando)
+                    TextButton(
+                      onPressed: _entrando
+                          ? null
+                          : () => _avisar(
+                                'En este prototipo no enviamos correos. Entrá con Continuar usando el correo que quieras.',
+                              ),
+                      child: const Text(
+                        '¿Olvidaste tu contraseña?',
+                        style: TextStyle(
+                          color: Color(0xFF2F6BFF),
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                  ),
                   const SizedBox(height: 4),
                   Wrap(
                     alignment: WrapAlignment.center,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       Text(
-                        '¿No tienes una cuenta? ',
+                        _creando ? '¿Ya tienes una cuenta? ' : '¿No tienes una cuenta? ',
                         style: tema.textTheme.bodyMedium?.copyWith(
                           color: const Color(0xFF6B7280),
                         ),
                       ),
                       GestureDetector(
-                        onTap: _entrando ? null : _continuar,
-                        child: const Text(
-                          'Crear cuenta',
-                          style: TextStyle(
+                        onTap: _entrando
+                            ? null
+                            : () => setState(() {
+                                  _creando = !_creando;
+                                  _error = null;
+                                }),
+                        child: Text(
+                          _creando ? 'Ingresar' : 'Crear cuenta',
+                          style: const TextStyle(
                             color: Color(0xFF16C96A),
                             fontWeight: FontWeight.w700,
                           ),
@@ -251,7 +272,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 4),
     ];
   }
 }
@@ -297,7 +318,7 @@ class _Campo extends StatelessWidget {
         suffixIcon: sufijo,
         filled: true,
         fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(vertical: 16),
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
         enabledBorder: borde,
         border: borde,
         focusedBorder: borde.copyWith(
@@ -309,8 +330,13 @@ class _Campo extends StatelessWidget {
 }
 
 class _BotonContinuar extends StatelessWidget {
-  const _BotonContinuar({required this.cargando, required this.alPulsar});
+  const _BotonContinuar({
+    required this.texto,
+    required this.cargando,
+    required this.alPulsar,
+  });
 
+  final String texto;
   final bool cargando;
   final VoidCallback? alPulsar;
 
@@ -344,9 +370,9 @@ class _BotonContinuar extends StatelessWidget {
                       height: 22,
                       child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
                     )
-                  : const Text(
-                      'Continuar  →',
-                      style: TextStyle(
+                  : Text(
+                      texto,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -361,33 +387,70 @@ class _BotonContinuar extends StatelessWidget {
 }
 
 class _BotonGoogle extends StatelessWidget {
-  const _BotonGoogle({required this.cargando, required this.alPulsar});
+  const _BotonGoogle({
+    required this.texto,
+    required this.cargando,
+    required this.alPulsar,
+  });
 
+  final String texto;
   final bool cargando;
   final VoidCallback? alPulsar;
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: cargando ? null : alPulsar,
-      style: OutlinedButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1F2937),
-        minimumSize: const Size.fromHeight(52),
-        side: const BorderSide(color: Color(0xFFE5E7EB)),
-        shape: const StadiumBorder(),
-        elevation: 0,
-      ),
-      child: const Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          GoogleLogo(size: 18),
-          SizedBox(width: 10),
-          Text(
-            'Ingresar con Google',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0xFFDADCE0), width: 1.4),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x140F3A5A),
+            blurRadius: 14,
+            offset: Offset(0, 6),
           ),
         ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: cargando ? null : alPulsar,
+          borderRadius: BorderRadius.circular(28),
+          child: SizedBox(
+            height: 52,
+            child: Center(
+              child: cargando
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: Color(0xFF4285F4),
+                      ),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const GoogleLogo(size: 22),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Text(
+                            texto,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Color(0xFF1F2937),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -399,7 +462,7 @@ class _Modulos extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const SizedBox(
-      height: 100,
+      height: 86,
       child: Stack(
         alignment: Alignment.bottomCenter,
         children: [
@@ -460,7 +523,7 @@ class _TarjetaModulo extends StatelessWidget {
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(4, 10, 4, 10),
+        padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

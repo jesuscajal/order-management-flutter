@@ -1,3 +1,5 @@
+import '../utils/moneda.dart';
+
 /// Línea de un pedido armado en la tienda, todavía sin guardar.
 class LineaPedidoTienda {
   const LineaPedidoTienda({
@@ -19,8 +21,9 @@ class LineaPedidoTienda {
   double get subtotal => precioUnitario * cantidad;
 }
 
-/// Mismo formato que la pantalla de stock: los precios guardados están en dólares.
-String monedaTienda(double valor) => 'US\$ ${valor.toStringAsFixed(2)}';
+/// Precio visible con la moneda del negocio. Ver [formatearMoneda].
+String monedaTienda(double valor, String codigo) =>
+    formatearMoneda(valor, codigo);
 
 double totalPedidoTienda(Iterable<LineaPedidoTienda> lineas) {
   var total = 0.0;
@@ -42,6 +45,7 @@ String mensajePedidoWhatsApp({
   required String comprador,
   String? telefono,
   required List<LineaPedidoTienda> lineas,
+  required String moneda,
 }) {
   final nombreNegocio = _nombreNegocio(negocio);
   final nombreComprador = _textoEnUnaLinea(comprador);
@@ -68,13 +72,13 @@ String mensajePedidoWhatsApp({
         linea.nombre.trim().isEmpty ? 'Producto' : linea.nombre.trim();
     buffer.writeln(
       '$producto x ${linea.cantidad} — '
-      '${monedaTienda(linea.precioUnitario)} c/u — '
-      '${monedaTienda(linea.subtotal)}',
+      '${monedaTienda(linea.precioUnitario, moneda)} c/u — '
+      '${monedaTienda(linea.subtotal, moneda)}',
     );
   }
   buffer
     ..writeln()
-    ..write('Total: ${monedaTienda(totalPedidoTienda(pedidas))}');
+    ..write('Total: ${monedaTienda(totalPedidoTienda(pedidas), moneda)}');
   return buffer.toString();
 }
 
@@ -85,6 +89,7 @@ Uri enlacePedidoWhatsApp({
   required String comprador,
   String? telefono,
   required List<LineaPedidoTienda> lineas,
+  required String moneda,
 }) {
   return Uri(
     scheme: 'https',
@@ -97,6 +102,7 @@ Uri enlacePedidoWhatsApp({
         comprador: comprador,
         telefono: telefono,
         lineas: lineas,
+        moneda: moneda,
       ),
     },
   );
@@ -108,6 +114,7 @@ Uri enlacePedidoWhatsApp({
 Uri enlaceCarritoWhatsApp({
   required String negocio,
   required List<LineaPedidoTienda> lineas,
+  required String moneda,
 }) {
   final pedidas = [
     for (final linea in lineas)
@@ -121,13 +128,13 @@ Uri enlaceCarritoWhatsApp({
         linea.nombre.trim().isEmpty ? 'Producto' : linea.nombre.trim();
     buffer.writeln(
       '$producto x ${linea.cantidad} — '
-      '${monedaTienda(linea.precioUnitario)} c/u — '
-      '${monedaTienda(linea.subtotal)}',
+      '${monedaTienda(linea.precioUnitario, moneda)} c/u — '
+      '${monedaTienda(linea.subtotal, moneda)}',
     );
   }
   buffer
     ..writeln()
-    ..write('Total: ${monedaTienda(totalPedidoTienda(pedidas))}');
+    ..write('Total: ${monedaTienda(totalPedidoTienda(pedidas), moneda)}');
   return Uri(
     scheme: 'https',
     host: 'wa.me',

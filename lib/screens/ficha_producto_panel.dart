@@ -1,18 +1,25 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../data/ampliacion_local.dart';
 import '../data/vidriera_local.dart';
+import '../services/asistente/foto_catalogo_asistente.dart';
 import '../services/negocio_local.dart';
+import '../services/openai_chat_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/elegir_foto.dart';
 
 /// Categoría, atributos, serie y variantes de un producto (RF 2.3, 2.4 y 2.6).
 class FichaProductoPanel extends StatefulWidget {
-  const FichaProductoPanel({super.key, required this.productoId});
+  const FichaProductoPanel({
+    super.key,
+    required this.productoId,
+    required this.nombre,
+  });
 
   final int productoId;
+  final String nombre;
 
   @override
   State<FichaProductoPanel> createState() => _FichaProductoPanelState();
@@ -31,6 +38,7 @@ class _FichaProductoPanelState extends State<FichaProductoPanel> {
   final _descripcion = TextEditingController();
   List<FotoVidriera> _fotos = [];
   bool _leyendoFoto = false;
+  bool _generando = false;
   bool _listo = false;
   bool _guardando = false;
   String? _error;
@@ -258,20 +266,63 @@ class _FichaProductoPanelState extends State<FichaProductoPanel> {
     });
   }
 
-  Future<void> _agregarFotos({String variante = ''}) async {
-    if (_leyendoFoto || _guardando) return;
+  Future<void> _generarFoto() async {
+    if (_leyendoFoto || _guardando || _generando) return;
     if (_fotos.length >= topeCantidadFotos) {
       setState(() => _error = mensajeGaleriaLlena);
       return;
     }
+    final nombre = widget.nombre.trim();
+    if (nombre.isEmpty) {
+      setState(() => _error = 'Falta el nombre del producto para generar la imagen.');
+      return;
+    }
+    setState(() {
+      _generando = true;
+      _error = null;
+    });
+    try {
+      final jpeg = await FotoCatalogoAsistente().generar(
+        nombre: nombre,
+        descripcion: _descripcion.text,
+      );
+      final texto = base64Encode(jpeg);
+      final rechazo = motivoRechazoFoto(texto);
+      if (!mounted) return;
+      if (rechazo != null) {
+        setState(() => _error = rechazo);
+        return;
+      }
+      setState(() {
+        _fotos = [..._fotos, FotoVidriera(base64: texto)];
+      });
+    } on ChatIaException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.mensaje);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = 'No se pudo generar la imagen.');
+    } finally {
+      if (mounted) setState(() => _generando = false);
+    }
+  }
+
+  Future<void> _agregarFotos({String variante = ''}) async {
+    if (_leyendoFoto || _guardando || _generando) return;
+    if (_fotos.length >= topeCantidadFotos) {
+      setState(() => _error = mensajeGaleriaLlena);
+      return;
+    }
+    final origen = await preguntarOrigenFoto(context);
+    if (origen == null || !mounted) return;
     setState(() {
       _leyendoFoto = true;
       _error = null;
     });
     try {
-      final archivos = await ImagePicker().pickMultiImage(
-        maxWidth: 900,
-        imageQuality: 40,
+      final archivos = await elegirFotos(
+        origen: origen,
+        variasEnGaleria: true,
       );
       if (archivos.isEmpty || !mounted) return;
       final nuevas = <FotoVidriera>[];
@@ -296,7 +347,7 @@ class _FichaProductoPanelState extends State<FichaProductoPanel> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = 'No pude leer la imagen.');
+      setState(() => _error = 'No pude abrir la cámara o la galería.');
     } finally {
       if (mounted) setState(() => _leyendoFoto = false);
     }
@@ -327,7 +378,9 @@ class _FichaProductoPanelState extends State<FichaProductoPanel> {
         for (final indice in indices)
           _MiniaturaFoto(
             base64: _fotos[indice].base64,
-            onQuitar: (_guardando || _leyendoFoto) ? null : () => _quitarFoto(indice),
+            onQuitar: (_guardando || _leyendoFoto || _generando)
+                ? null
+                : () => _quitarFoto(indice),
           ),
       ],
     );
@@ -467,7 +520,7 @@ class _FichaProductoPanelState extends State<FichaProductoPanel> {
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton.icon(
-                    onPressed: (_guardando || _leyendoFoto)
+                    onPressed: (_guardando || _leyendoFoto || _generando)
                         ? null
                         : () => _agregarFotos(variante: variante.etiqueta),
                     icon: const Icon(Icons.add_a_photo_outlined),
@@ -504,9 +557,29 @@ class _FichaProductoPanelState extends State<FichaProductoPanel> {
             Align(
               alignment: Alignment.centerLeft,
               child: TextButton.icon(
-                onPressed: (_guardando || _leyendoFoto) ? null : _agregarFotos,
+                onPressed: (_guardando || _leyendoFoto || _generando)
+                    ? null
+                    : _agregarFotos,
                 icon: const Icon(Icons.photo_library_outlined),
                 label: Text(_leyendoFoto ? 'Leyendo foto...' : 'Agregar fotos'),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: (_guardando || _leyendoFoto || _generando)
+                    ? null
+                    : _generarFoto,
+                icon: Icon(
+                  _generando
+                      ? Icons.hourglass_top
+                      : Icons.auto_awesome_outlined,
+                ),
+                label: Text(
+                  _generando
+                      ? 'Generando...'
+                      : 'Generar según título y descripción',
+                ),
               ),
             ),
             _miniaturas(''),

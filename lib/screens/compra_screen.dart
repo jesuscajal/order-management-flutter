@@ -5,7 +5,9 @@ import '../data/ampliacion_local.dart';
 import '../data/app_database.dart';
 import '../data/capital_repository.dart';
 import '../data/stock_repository.dart';
+import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 import '../widgets/fondo_gexi.dart';
 
 /// Compra a un proveedor: entra stock de un producto que ya existe.
@@ -32,11 +34,13 @@ class _CompraScreenState extends State<CompraScreen> {
   bool _cargando = false;
   bool _guardando = false;
   String? _error;
+  String _codigoMoneda = monedaPorDefecto;
   _DatosCompra? _deudaPendiente;
 
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     if (widget.database != null) {
       _cargando = true;
       _cargar();
@@ -50,6 +54,12 @@ class _CompraScreenState extends State<CompraScreen> {
     _costo.dispose();
     _saldo.dispose();
     super.dispose();
+  }
+
+  Future<void> _leerMoneda() async {
+    final codigo = await monedaDelNegocio();
+    if (!mounted || codigo == _codigoMoneda) return;
+    setState(() => _codigoMoneda = codigo);
   }
 
   Future<void> _cargar() async {
@@ -142,7 +152,7 @@ class _CompraScreenState extends State<CompraScreen> {
       }
       try {
         final saldoTexto = compra.saldo > 0
-            ? ' Saldo a pagar ${CapitalRepository.textoMonto(compra.saldo)}.'
+            ? ' Saldo a pagar ${formatearMoneda(compra.saldo, _codigoMoneda)}.'
             : '';
         await const AmpliacionLocal().anotar(
           accion: 'alta',
@@ -174,7 +184,7 @@ class _CompraScreenState extends State<CompraScreen> {
     if (!mounted) return;
     _deudaPendiente = null;
     final mensaje = compra.saldo > 0
-        ? 'Entraron ${compra.cantidad} de ${compra.producto.nombre}. Quedó un saldo a pagar de ${CapitalRepository.textoMonto(compra.saldo)} con ${compra.proveedor}.'
+        ? 'Entraron ${compra.cantidad} de ${compra.producto.nombre}. Quedó un saldo a pagar de ${formatearMoneda(compra.saldo, _codigoMoneda)} con ${compra.proveedor}.'
         : 'Entraron ${compra.cantidad} de ${compra.producto.nombre}. No quedó saldo con ${compra.proveedor}.';
     _cantidad.clear();
     _costo.clear();
@@ -219,7 +229,7 @@ class _CompraScreenState extends State<CompraScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Quedó un saldo a pagar de ${CapitalRepository.textoMonto(compra.saldo)} con ${compra.proveedor}.',
+          'Quedó un saldo a pagar de ${formatearMoneda(compra.saldo, _codigoMoneda)} con ${compra.proveedor}.',
         ),
       ),
     );
@@ -277,14 +287,14 @@ class _CompraScreenState extends State<CompraScreen> {
     final base = 'Compra a ${compra.proveedor}';
     final costo = compra.costo;
     if (costo == null) return base;
-    return '$base · costo unitario ${CapitalRepository.textoMonto(costo)}';
+    return '$base · costo unitario ${formatearMoneda(costo, _codigoMoneda)}';
   }
 
   String _textoConfirmacion(_DatosCompra compra) {
     final entrada =
         'Entran ${compra.cantidad} de ${compra.producto.nombre} al stock de Yo. La descripción nombra a ${compra.proveedor}.';
     if (compra.saldo > 0) {
-      return '$entrada\n\nQueda un saldo a pagar de ${CapitalRepository.textoMonto(compra.saldo)} con ${compra.proveedor}.';
+      return '$entrada\n\nQueda un saldo a pagar de ${formatearMoneda(compra.saldo, _codigoMoneda)} con ${compra.proveedor}.';
     }
     return '$entrada\n\nNo queda saldo a pagar.';
   }

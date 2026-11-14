@@ -1,5 +1,5 @@
 class SubdominioTienda {
-  static const dominioBase = 'gexi-novaceltec.com';
+  static const dominioBase = 'gexi.com.ar';
 
   static const _reservados = {
     'www',
@@ -16,6 +16,10 @@ class SubdominioTienda {
     'smtp',
     'ns1',
     'ns2',
+    'assets',
+    'icons',
+    'fonts',
+    'canvaskit',
   };
 
   static const _sinAcento = {
@@ -73,28 +77,40 @@ class SubdominioTienda {
     return slug;
   }
 
+  /// `gexi.com.ar/novaceltec` abre esa tienda. La raíz sigue siendo el ingreso.
+  static String? slugDesdeRuta(String path) {
+    final partes = [
+      for (final parte in path.split('/'))
+        if (parte.trim().isNotEmpty) parte.trim().toLowerCase(),
+    ];
+    if (partes.length != 1) return null;
+    final slug = partes.first;
+    if (validarSlug(slug) != null) return null;
+    return slug;
+  }
+
   static String urlPublica(String slug) {
-    return 'https://${slug.trim().toLowerCase()}.$dominioBase';
+    return 'https://$dominioBase/${slug.trim().toLowerCase()}';
   }
 
   static String? validarSlug(String slug) {
     if (slug.length < 3 || slug.length > 30) {
-      return 'El subdominio debe tener entre 3 y 30 caracteres.';
+      return 'La dirección debe tener entre 3 y 30 caracteres.';
     }
     if (slug != slug.toLowerCase()) {
-      return 'El subdominio debe estar escrito en minúsculas.';
+      return 'La dirección debe estar escrita en minúsculas.';
     }
     if (!RegExp(r'^[a-z0-9-]+$').hasMatch(slug)) {
       return 'Usá solo letras sin acentos, números y guiones.';
     }
     if (slug.startsWith('-') || slug.endsWith('-')) {
-      return 'El subdominio no puede empezar ni terminar con guion.';
+      return 'La dirección no puede empezar ni terminar con guion.';
     }
     if (slug.contains('--')) {
-      return 'El subdominio no puede contener guiones dobles.';
+      return 'La dirección no puede contener guiones dobles.';
     }
     if (_reservados.contains(slug)) {
-      return 'Ese subdominio está reservado.';
+      return 'Esa dirección está reservada.';
     }
     return null;
   }
@@ -117,5 +133,24 @@ class SubdominioTienda {
       slug = slug.substring(0, 30).replaceFirst(RegExp(r'-+$'), '');
     }
     return slug;
+  }
+
+  /// Si el nombre ya tiene dueño, la dirección suma el código del negocio.
+  /// Ese código es único, así que dos tiendas no comparten la misma página.
+  static String slugConCodigo(String base, String codigo) {
+    final marca = codigo.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+    if (marca.isEmpty) return sugerirSlug(base);
+    final cupo = 30 - marca.length - 1;
+    if (cupo < 1) return sugerirSlug(marca);
+    var nombre = sugerirSlug(base);
+    if (nombre.endsWith('-$marca')) {
+      nombre = nombre.substring(0, nombre.length - marca.length - 1);
+    }
+    if (nombre.length > cupo) {
+      nombre = nombre.substring(0, cupo).replaceFirst(RegExp(r'-+$'), '');
+    }
+    if (nombre.isEmpty || _reservados.contains(nombre)) nombre = 'tienda';
+    final junto = '$nombre-$marca';
+    return validarSlug(junto) == null ? junto : sugerirSlug(junto);
   }
 }

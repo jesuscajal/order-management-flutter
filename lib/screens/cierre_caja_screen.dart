@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../data/ampliacion_local.dart';
 import '../data/app_database.dart';
 import '../data/capital_repository.dart';
+import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
+import '../utils/moneda.dart';
 import '../widgets/fondo_gexi.dart';
 
 /// Cierre del día: consulta el capital de hoy y lo compara con el efectivo contado.
@@ -26,15 +28,23 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
   bool _cargando = false;
   bool _guardando = false;
   String? _error;
+  String _codigoMoneda = monedaPorDefecto;
 
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     _contado.addListener(_alEscribirContado);
     if (widget.database != null) {
       _cargando = true;
       _cargar();
     }
+  }
+
+  Future<void> _leerMoneda() async {
+    final codigo = await monedaDelNegocio();
+    if (!mounted || codigo == _codigoMoneda) return;
+    setState(() => _codigoMoneda = codigo);
   }
 
   void _alEscribirContado() {
@@ -91,7 +101,7 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Anotar diferencia'),
         content: Text(
-          'Se anota $verbo de ${CapitalRepository.textoMonto(ajuste.monto)} con la descripción "${TotalesCierreCaja.descripcionAjuste}". No se borra ningún movimiento.\n\n$aviso',
+          'Se anota $verbo de ${formatearMoneda(ajuste.monto, _codigoMoneda)} con la descripción "${TotalesCierreCaja.descripcionAjuste}". No se borra ningún movimiento.\n\n$aviso',
         ),
         actions: [
           TextButton(
@@ -140,7 +150,7 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
           accion: 'alta',
           entidad: 'capital',
           detalle:
-              'Cierre de caja: ${TiposCapital.etiqueta(ajuste.tipo)} ${CapitalRepository.textoMonto(ajuste.monto)}',
+              'Cierre de caja: ${TiposCapital.etiqueta(ajuste.tipo)} ${formatearMoneda(ajuste.monto, _codigoMoneda)}',
         );
       } catch (_) {
         // El movimiento ya quedó en capital.
@@ -217,11 +227,11 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
                         titulo: 'Totales de hoy',
                         child: Column(
                           children: [
-                            _Linea('Entradas', totales.entradas),
-                            _Linea('Salidas', totales.salidas),
-                            _Linea('Cobros', totales.cobros),
-                            _Linea('A cobrar', totales.aCobrar),
-                            _Linea('A pagar', totales.aPagar),
+                            _Linea('Entradas', totales.entradas, _codigoMoneda),
+                            _Linea('Salidas', totales.salidas, _codigoMoneda),
+                            _Linea('Cobros', totales.cobros, _codigoMoneda),
+                            _Linea('A cobrar', totales.aCobrar, _codigoMoneda),
+                            _Linea('A pagar', totales.aPagar, _codigoMoneda),
                             const SizedBox(height: 8),
                             const Text(
                               'Entradas: tipo entrada, aporte y venta cobrada. Salidas: salida, retiro, gasto y pago de deuda. Cobros: cobros y devoluciones. A cobrar y a pagar son lo cargado hoy, no el saldo de siempre.',
@@ -241,13 +251,14 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _Linea('Entradas en efectivo',
-                                totales.entradasEfectivo),
+                                totales.entradasEfectivo, _codigoMoneda),
                             _Linea('Entradas por transferencia',
-                                totales.ingresosTransferencia),
+                                totales.ingresosTransferencia, _codigoMoneda),
                             _Linea('Entradas por otro medio',
-                                totales.ingresosOtro),
+                                totales.ingresosOtro, _codigoMoneda),
                             _Linea(
-                                'Salidas en efectivo', totales.salidasEfectivo),
+                                'Salidas en efectivo', totales.salidasEfectivo,
+                                _codigoMoneda),
                             const SizedBox(height: 8),
                             const Text(
                               'La diferencia compara el efectivo contado con las entradas en efectivo. No resta las salidas. Cuenta como efectivo lo que empieza con Efectivo y lo que no dice Transferencia ni Otro. Incluye entradas, aportes, ventas cobradas y cobros en efectivo.',
@@ -281,6 +292,7 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
                               _Linea(
                                 'Diferencia',
                                 diferencia / 100,
+                                _codigoMoneda,
                                 color: diferencia == 0
                                     ? AppColors.texto
                                     : diferencia > 0
@@ -327,7 +339,10 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
                                 children: [
                                   for (var i = 0; i < deHoy.length; i++) ...[
                                     if (i > 0) const Divider(height: 16),
-                                    _MovimientoTile(movimiento: deHoy[i]),
+                                    _MovimientoTile(
+                                      movimiento: deHoy[i],
+                                      moneda: _codigoMoneda,
+                                    ),
                                   ],
                                 ],
                               ),
@@ -384,10 +399,11 @@ class _Tarjeta extends StatelessWidget {
 }
 
 class _Linea extends StatelessWidget {
-  const _Linea(this.etiqueta, this.valor, {this.color});
+  const _Linea(this.etiqueta, this.valor, this.moneda, {this.color});
 
   final String etiqueta;
   final double valor;
+  final String moneda;
   final Color? color;
 
   @override
@@ -400,7 +416,7 @@ class _Linea extends StatelessWidget {
           Expanded(child: Text(etiqueta, style: estilo)),
           const SizedBox(width: 12),
           Text(
-            CapitalRepository.textoMonto(valor),
+            formatearMoneda(valor, moneda),
             style: color == null ? estilo : estilo?.copyWith(color: color),
           ),
         ],
@@ -410,9 +426,10 @@ class _Linea extends StatelessWidget {
 }
 
 class _MovimientoTile extends StatelessWidget {
-  const _MovimientoTile({required this.movimiento});
+  const _MovimientoTile({required this.movimiento, required this.moneda});
 
   final MovimientoCapitalRegistro movimiento;
+  final String moneda;
 
   @override
   Widget build(BuildContext context) {
@@ -434,7 +451,7 @@ class _MovimientoTile extends StatelessWidget {
               ),
             ),
             Text(
-              CapitalRepository.textoMonto(movimiento.monto),
+              formatearMoneda(movimiento.monto, moneda),
               style: const TextStyle(
                 color: AppColors.texto,
                 fontWeight: FontWeight.w700,

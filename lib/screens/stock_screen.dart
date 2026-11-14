@@ -1,9 +1,17 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../data/ampliacion_local.dart';
 import '../data/app_database.dart';
 import '../data/stock_repository.dart';
+import '../data/vidriera_local.dart';
+import '../services/asistente/foto_catalogo_asistente.dart';
+import '../services/negocio_local.dart';
+import '../services/openai_chat_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/elegir_foto.dart';
+import '../utils/moneda.dart';
 import 'ficha_producto_panel.dart';
 
 /// Gestión de stock.
@@ -20,20 +28,31 @@ class StockScreen extends StatefulWidget {
   State<StockScreen> createState() => _StockScreenState();
 }
 
+const _topeImagenesProducto = 4;
+
 class _StockScreenState extends State<StockScreen> {
   StockRepository? _repo;
   List<ProductoStock> _productos = [];
   Map<int, FichaProducto> _fichas = {};
+  Map<int, List<String>> _fotos = {};
   bool _cargando = false;
   String? _error;
   int _cargaToken = 0;
 
   bool get _usaBase => _repo != null;
+  String _codigoMoneda = monedaPorDefecto;
 
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     _vincularBase(widget.database, notificar: false);
+  }
+
+  Future<void> _leerMoneda() async {
+    final codigo = await monedaDelNegocio();
+    if (!mounted || codigo == _codigoMoneda) return;
+    setState(() => _codigoMoneda = codigo);
   }
 
   @override
@@ -100,10 +119,15 @@ class _StockScreenState extends State<StockScreen> {
     try {
       final productos = await repo.obtenerProductos();
       final fichas = await const AmpliacionLocal().cargar();
+      final vidriera = await const VidrieraLocal().cargar();
       if (!mounted || token != _cargaToken) return;
       setState(() {
         _productos = productos;
         _fichas = fichas.fichas;
+        _fotos = {
+          for (final entrada in vidriera.entries)
+            entrada.key: _fotosGenerales(entrada.value),
+        };
         _cargando = false;
         _error = null;
       });
@@ -136,8 +160,10 @@ class _StockScreenState extends State<StockScreen> {
     required double precioCompra,
     required double? precioVenta,
     required String propietario,
+    String? fotoBase64,
   }) async {
     final repo = _repo;
+    final foto = fotoBase64?.trim() ?? '';
     if (repo != null) {
       await repo.registrarEntrada(
         nombre: nombre,
@@ -151,6 +177,20 @@ class _StockScreenState extends State<StockScreen> {
         entidad: 'stock',
         detalle: 'Entrada de $cantidad de $nombre',
       );
+      if (foto.isNotEmpty) {
+        try {
+          await _adjuntarFotoDeEntrada(nombre, foto);
+        } catch (error) {
+          if (mounted) {
+            final texto = error is VidrieraRechazada
+                ? error.mensaje
+                : 'No se pudo guardar la foto.';
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('El stock se guardó. $texto')),
+            );
+          }
+        }
+      }
       if (!mounted) return;
       await _cargar(silencioso: true);
       return;
@@ -181,6 +221,106 @@ class _StockScreenState extends State<StockScreen> {
     }
     if (!mounted) return;
     setState(() {});
+    if (foto.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'El stock quedó en memoria. En este modo la foto no se guarda.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _adjuntarFotoDeEntrada(String nombre, String fotoBase64) async {
+    final repo = _repo;
+    if (repo == null) {
+      throw const VidrieraRechazada(
+        'En el modo de demostración la foto no se guarda.',
+      );
+    }
+    final productos = await repo.obtenerProductos();
+    ProductoStock? hallado;
+    for (final producto in productos) {
+      if (producto.nombre.toLowerCase() == nombre.toLowerCase()) {
+        hallado = producto;
+        break;
+      }
+    }
+    final id = hallado?.id;
+    if (id == null) {
+      throw const VidrieraRechazada(
+        'No encontré el producto para adjuntar la foto.',
+      );
+    }
+    await _sumarFotos(id, [fotoBase64]);
+  }
+
+  List<String> _fotosGenerales(DatoVidriera dato) {
+    return [
+      for (final foto in dato.galeria)
+        if (foto.variante.trim().isEmpty && foto.base64.isNotEmpty) foto.base64,
+    ];
+  }
+
+  List<String> _imagenesDe(ProductoStock producto) {
+    final id = producto.id;
+    if (id == null) return const [];
+    return _fotos[id] ?? const [];
+  }
+
+  Future<void> _sumarFotos(int productoId, List<String> nuevas) async {
+    if (nuevas.isEmpty) return;
+    final actual = await const VidrieraLocal().de(productoId);
+    final generales = _fotosGenerales(actual);
+    final variantes = [
+      for (final foto in actual.galeria)
+        if (foto.variante.trim().isNotEmpty) foto,
+    ];
+    final cupo = _topeImagenesProducto - generales.length;
+    if (cupo <= 0) {
+      throw const VidrieraRechazada(
+        'Este producto ya tiene 4 imágenes.',
+      );
+    }
+    final aceptadas = <FotoVidriera>[];
+    for (final foto in nuevas) {
+      if (aceptadas.length >= cupo) break;
+      final rechazo = motivoRechazoFoto(foto);
+      if (rechazo != null) throw VidrieraRechazada(rechazo);
+      aceptadas.add(FotoVidriera(base64: foto));
+    }
+    await const VidrieraLocal().guardar(
+      productoId: productoId,
+      descripcion: actual.descripcion,
+      fotoBase64: '',
+      fotos: [
+        for (final foto in generales) FotoVidriera(base64: foto),
+        ...aceptadas,
+        ...variantes,
+      ],
+    );
+  }
+
+  Future<void> _gestionarImagenes(ProductoStock producto) async {
+    final id = producto.id;
+    if (id == null) {
+      _avisar('En este modo la imagen no se guarda.');
+      return;
+    }
+    final cambio = await showDialog<bool>(
+      context: context,
+      builder: (context) => _ImagenesProductoDialog(
+        productoId: id,
+        nombre: producto.nombre,
+        iniciales: _imagenesDe(producto),
+      ),
+    );
+    if (cambio == true && mounted) await _cargar(silencioso: true);
+  }
+
+  void _avisar(String mensaje) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(mensaje)));
   }
 
   void _abrirDetalle(ProductoStock producto) {
@@ -298,6 +438,8 @@ class _StockScreenState extends State<StockScreen> {
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
                     columnSpacing: 24,
+                    dataRowMinHeight: 72,
+                    dataRowMaxHeight: 84,
                     showCheckboxColumn: false,
                     headingRowColor: WidgetStatePropertyAll(
                       Theme.of(context).dividerColor.withValues(alpha: 0.2),
@@ -346,34 +488,43 @@ class _StockScreenState extends State<StockScreen> {
                           onSelectChanged: (_) => _abrirDetalle(producto),
                           cells: [
                             DataCell(
-                              Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              Row(
                                 children: [
-                                  Text(
-                                    producto.nombre,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodyLarge
-                                        ?.copyWith(fontWeight: FontWeight.bold),
+                                  _CeldaImagen(
+                                    fotos: _imagenesDe(producto),
+                                    onTap: () => _gestionarImagenes(producto),
                                   ),
-                                  if (_stockBajo(producto))
-                                    const Text(
-                                      'Stock bajo',
-                                      style: TextStyle(
-                                        color: AppColors.alerta,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
+                                  const SizedBox(width: 12),
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        producto.nombre,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyLarge
+                                            ?.copyWith(fontWeight: FontWeight.bold),
                                       ),
-                                    ),
+                                      if (_stockBajo(producto))
+                                        const Text(
+                                          'Stock bajo',
+                                          style: TextStyle(
+                                            color: AppColors.alerta,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ],
                               ),
                             ),
                             DataCell(Text('${producto.stockTotal}')),
                             DataCell(Text('${producto.stockYo}')),
                             DataCell(Text('${producto.stockNildo}')),
-                            DataCell(Text(_moneda(producto.precioCompra))),
-                            DataCell(Text(_moneda(producto.precioVenta))),
+                            DataCell(Text(formatearMoneda(producto.precioCompra, _codigoMoneda))),
+                            DataCell(Text(formatearMoneda(producto.precioVenta, _codigoMoneda))),
                           ],
                         ),
                     ],
@@ -392,12 +543,304 @@ class _StockScreenState extends State<StockScreen> {
   }
 }
 
+class _CeldaImagen extends StatelessWidget {
+  const _CeldaImagen({required this.fotos, required this.onTap});
+
+  final List<String> fotos;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primera = fotos.isEmpty ? null : bytesDeFotoVidriera(fotos.first);
+    if (primera == null) {
+      return TextButton(
+        onPressed: onTap,
+        style: TextButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+        ),
+        child: const Text('Agregar imagen'),
+      );
+    }
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Image.memory(
+              primera,
+              width: 56,
+              height: 56,
+              fit: BoxFit.cover,
+            ),
+          ),
+          if (fotos.length > 1)
+            Positioned(
+              right: -4,
+              bottom: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.texto,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '${fotos.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ImagenesProductoDialog extends StatefulWidget {
+  const _ImagenesProductoDialog({
+    required this.productoId,
+    required this.nombre,
+    required this.iniciales,
+  });
+
+  final int productoId;
+  final String nombre;
+  final List<String> iniciales;
+
+  @override
+  State<_ImagenesProductoDialog> createState() => _ImagenesProductoDialogState();
+}
+
+class _ImagenesProductoDialogState extends State<_ImagenesProductoDialog> {
+  late List<String> _fotos = List<String>.of(widget.iniciales);
+  bool _guardando = false;
+  bool _generando = false;
+  bool _cambio = false;
+  String? _error;
+
+  Future<void> _generar() async {
+    if (_guardando || _generando) return;
+    if (_fotos.length >= _topeImagenesProducto) {
+      setState(() => _error = 'Este producto ya tiene 4 imágenes.');
+      return;
+    }
+    final nombre = widget.nombre.trim();
+    if (nombre.isEmpty) {
+      setState(() => _error = 'Falta el nombre del producto para generar la imagen.');
+      return;
+    }
+    setState(() {
+      _generando = true;
+      _error = null;
+    });
+    try {
+      final actual = await const VidrieraLocal().de(widget.productoId);
+      final texto = await _fotoGenerada(
+        nombre: nombre,
+        descripcion: actual.descripcion,
+      );
+      if (!mounted) return;
+      final rechazo = motivoRechazoFoto(texto);
+      if (rechazo != null) {
+        setState(() => _error = rechazo);
+        return;
+      }
+      final variantes = [
+        for (final foto in actual.galeria)
+          if (foto.variante.trim().isNotEmpty) foto,
+      ];
+      await const VidrieraLocal().guardar(
+        productoId: widget.productoId,
+        descripcion: actual.descripcion,
+        fotoBase64: '',
+        fotos: [
+          for (final foto in _fotos) FotoVidriera(base64: foto),
+          FotoVidriera(base64: texto),
+          ...variantes,
+        ],
+      );
+      if (!mounted) return;
+      setState(() {
+        _fotos = [..._fotos, texto];
+        _cambio = true;
+      });
+    } on ChatIaException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error.mensaje);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error is VidrieraRechazada
+            ? error.mensaje
+            : 'No se pudo generar la imagen.';
+      });
+    } finally {
+      if (mounted) setState(() => _generando = false);
+    }
+  }
+
+  Future<void> _agregar() async {
+    if (_guardando || _generando) return;
+    if (_fotos.length >= _topeImagenesProducto) {
+      setState(() => _error = 'Este producto ya tiene 4 imágenes.');
+      return;
+    }
+    final origen = await preguntarOrigenFoto(context);
+    if (origen == null || !mounted) return;
+    setState(() {
+      _guardando = true;
+      _error = null;
+    });
+    try {
+      final archivos = await elegirFotos(
+        origen: origen,
+        variasEnGaleria: true,
+      );
+      if (!mounted) return;
+      if (archivos.isEmpty) return;
+      final cupo = _topeImagenesProducto - _fotos.length;
+      final tomadas = archivos.take(cupo).toList();
+      final nuevas = <String>[];
+      for (final archivo in tomadas) {
+        final texto = base64Encode(await archivo.readAsBytes());
+        final rechazo = motivoRechazoFoto(texto);
+        if (rechazo != null) {
+          setState(() => _error = rechazo);
+          return;
+        }
+        nuevas.add(texto);
+      }
+      final actual = await const VidrieraLocal().de(widget.productoId);
+      final variantes = [
+        for (final foto in actual.galeria)
+          if (foto.variante.trim().isNotEmpty) foto,
+      ];
+      await const VidrieraLocal().guardar(
+        productoId: widget.productoId,
+        descripcion: actual.descripcion,
+        fotoBase64: '',
+        fotos: [
+          for (final foto in _fotos) FotoVidriera(base64: foto),
+          for (final foto in nuevas) FotoVidriera(base64: foto),
+          ...variantes,
+        ],
+      );
+      if (!mounted) return;
+      setState(() {
+        _fotos = [..._fotos, ...nuevas];
+        _cambio = true;
+        _error = archivos.length > cupo
+            ? 'Se guardaron $cupo. El máximo es 4 imágenes.'
+            : null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _error = error is VidrieraRechazada
+            ? error.mensaje
+            : 'No se pudo guardar la imagen.';
+      });
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lleno = _fotos.length >= _topeImagenesProducto;
+    final ocupado = _guardando || _generando;
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(widget.nombre),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _fotos.isEmpty
+                  ? 'Todavía no tiene imágenes. Podés agregar hasta 4.'
+                  : '${_fotos.length} de $_topeImagenesProducto imágenes.',
+              style: const TextStyle(color: AppColors.textoSuave),
+            ),
+            if (_fotos.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final foto in _fotos)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        base64Decode(foto),
+                        width: 72,
+                        height: 72,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stack) => const SizedBox(
+                          width: 72,
+                          height: 72,
+                          child: ColoredBox(
+                            color: Color(0xFFF3F4F6),
+                            child: Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: ocupado || lleno ? null : _agregar,
+              icon: Icon(
+                _guardando ? Icons.hourglass_top : Icons.add_a_photo_outlined,
+              ),
+              label: Text(_guardando ? 'Guardando...' : 'Agregar imagen'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: ocupado || lleno ? null : _generar,
+              icon: Icon(
+                _generando ? Icons.hourglass_top : Icons.auto_awesome_outlined,
+              ),
+              label: Text(
+                _generando ? 'Generando...' : 'Generar según título y descripción',
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(_error!, style: const TextStyle(color: AppColors.alerta)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: ocupado
+              ? null
+              : () => Navigator.pop(context, _cambio),
+          child: const Text('Listo'),
+        ),
+      ],
+    );
+  }
+}
+
 typedef _GuardarEntrada = Future<void> Function({
   required String nombre,
   required int cantidad,
   required double precioCompra,
   required double? precioVenta,
   required String propietario,
+  String? fotoBase64,
 });
 
 class _AltaStockDialog extends StatefulWidget {
@@ -416,6 +859,9 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
   final _ventaCtrl = TextEditingController();
   var _propietario = StockRepository.propietarioYo;
   var _guardando = false;
+  var _leyendoFoto = false;
+  var _generando = false;
+  String? _fotoBase64;
   String? _mensajeError;
 
   @override
@@ -448,6 +894,69 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
     return null;
   }
 
+  Future<void> _generarFoto() async {
+    if (_guardando || _leyendoFoto || _generando) return;
+    final nombre = _nombreCtrl.text.trim();
+    if (nombre.isEmpty) {
+      setState(() {
+        _mensajeError = 'Escribí el nombre del producto para generar la imagen.';
+      });
+      return;
+    }
+    setState(() {
+      _generando = true;
+      _mensajeError = null;
+    });
+    try {
+      final texto = await _fotoGenerada(nombre: nombre);
+      if (!mounted) return;
+      final rechazo = motivoRechazoFoto(texto);
+      if (rechazo != null) {
+        setState(() => _mensajeError = rechazo);
+        return;
+      }
+      setState(() => _fotoBase64 = texto);
+    } on ChatIaException catch (error) {
+      if (!mounted) return;
+      setState(() => _mensajeError = error.mensaje);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _mensajeError = 'No se pudo generar la imagen.');
+    } finally {
+      if (mounted) setState(() => _generando = false);
+    }
+  }
+
+  Future<void> _elegirFoto() async {
+    if (_guardando || _leyendoFoto || _generando) return;
+    final origen = await preguntarOrigenFoto(context);
+    if (origen == null || !mounted) return;
+    setState(() {
+      _leyendoFoto = true;
+      _mensajeError = null;
+    });
+    try {
+      final archivos = await elegirFotos(
+        origen: origen,
+        variasEnGaleria: false,
+      );
+      if (archivos.isEmpty || !mounted) return;
+      final texto = base64Encode(await archivos.first.readAsBytes());
+      final rechazo = motivoRechazoFoto(texto);
+      if (!mounted) return;
+      if (rechazo != null) {
+        setState(() => _mensajeError = rechazo);
+        return;
+      }
+      setState(() => _fotoBase64 = texto);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _mensajeError = 'No pude abrir la cámara o la galería.');
+    } finally {
+      if (mounted) setState(() => _leyendoFoto = false);
+    }
+  }
+
   Future<void> _guardar() async {
     final error = _validar();
     if (error != null) {
@@ -465,6 +974,7 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
         precioCompra: _parseDecimal(_compraCtrl.text)!,
         precioVenta: _parseDecimal(_ventaCtrl.text),
         propietario: _propietario,
+        fotoBase64: _fotoBase64,
       );
       if (!mounted) return;
       Navigator.pop(context);
@@ -521,6 +1031,66 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
                 labelText: 'Precio de venta (opcional)',
               ),
             ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: (_guardando || _leyendoFoto || _generando)
+                    ? null
+                    : _elegirFoto,
+                icon: Icon(
+                  _leyendoFoto
+                      ? Icons.hourglass_top
+                      : Icons.add_a_photo_outlined,
+                ),
+                label: Text(
+                  _leyendoFoto
+                      ? 'Leyendo foto...'
+                      : (_fotoBase64 == null
+                          ? 'Foto del producto'
+                          : 'Cambiar foto'),
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: (_guardando || _leyendoFoto || _generando)
+                    ? null
+                    : _generarFoto,
+                icon: Icon(
+                  _generando
+                      ? Icons.hourglass_top
+                      : Icons.auto_awesome_outlined,
+                ),
+                label: Text(
+                  _generando
+                      ? 'Generando...'
+                      : 'Generar según el nombre',
+                ),
+              ),
+            ),
+            if (_fotoBase64 != null) ...[
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(
+                  base64Decode(_fotoBase64!),
+                  height: 96,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: (_guardando || _generando)
+                      ? null
+                      : () => setState(() => _fotoBase64 = null),
+                  child: const Text('Quitar foto'),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: _propietario,
@@ -613,6 +1183,8 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
   String? _errorNombre;
   String? _errorAjuste;
 
+  String _codigoMoneda = monedaPorDefecto;
+
   late final TextEditingController _nombreCtrl;
   late final TextEditingController _compraCtrl;
   late final TextEditingController _ventaCtrl;
@@ -622,6 +1194,7 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
   @override
   void initState() {
     super.initState();
+    _leerMoneda();
     _producto = widget.producto;
     _nombreCtrl = TextEditingController(text: _producto.nombre);
     _compraCtrl =
@@ -631,6 +1204,12 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
     _cantidadCtrl = TextEditingController();
     _descripcionCtrl = TextEditingController();
     _cargarHistorial();
+  }
+
+  Future<void> _leerMoneda() async {
+    final codigo = await monedaDelNegocio();
+    if (!mounted || codigo == _codigoMoneda) return;
+    setState(() => _codigoMoneda = codigo);
   }
 
   @override
@@ -879,7 +1458,7 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
                     if (_producto.precioVenta > 0 || _producto.precioCompra > 0) ...[
                       const SizedBox(height: 8),
                       Text(
-                        'Margen: ${_moneda(_producto.precioVenta - _producto.precioCompra)}',
+                        'Margen: ${formatearMoneda(_producto.precioVenta - _producto.precioCompra, _codigoMoneda)}',
                       ),
                     ],
                     const SizedBox(height: 8),
@@ -894,8 +1473,8 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                        'Precio de compra: ${_moneda(_producto.precioCompra)}'),
-                    Text('Precio de venta: ${_moneda(_producto.precioVenta)}'),
+                        'Precio de compra: ${formatearMoneda(_producto.precioCompra, _codigoMoneda)}'),
+                    Text('Precio de venta: ${formatearMoneda(_producto.precioVenta, _codigoMoneda)}'),
                     Text('Tu stock: ${_producto.stockYo}'),
                     Text('Stock de Nildo: ${_producto.stockNildo}'),
                     Text(
@@ -915,7 +1494,12 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
             ),
             if (_producto.id != null) ...[
               const SizedBox(height: 16),
-              FichaProductoPanel(productoId: _producto.id!),
+              FichaProductoPanel(
+                productoId: _producto.id!,
+                nombre: _nombreCtrl.text.trim().isEmpty
+                    ? _producto.nombre
+                    : _nombreCtrl.text.trim(),
+              ),
             ],
             const SizedBox(height: 16),
             Card(
@@ -1125,6 +1709,17 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
   }
 }
 
+Future<String> _fotoGenerada({
+  required String nombre,
+  String descripcion = '',
+}) async {
+  final jpeg = await FotoCatalogoAsistente().generar(
+    nombre: nombre,
+    descripcion: descripcion,
+  );
+  return base64Encode(jpeg);
+}
+
 String _etiquetaTipo(String tipo) {
   switch (tipo) {
     case StockRepository.tipoEntrada:
@@ -1135,8 +1730,6 @@ String _etiquetaTipo(String tipo) {
       return tipo;
   }
 }
-
-String _moneda(double valor) => 'US\$ ${valor.toStringAsFixed(2)}';
 
 String _textoPrecio(double valor) {
   final texto = valor.toStringAsFixed(2);

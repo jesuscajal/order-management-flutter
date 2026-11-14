@@ -7,12 +7,16 @@ import 'ids_remotos.dart';
 import 'remoto_comun.dart';
 import 'stock_remoto.dart';
 
-/// Nombre y precio de una variante. El stock de la variante no tiene columna
-/// en `variantes_producto`: queda en la ficha del teléfono.
+/// Nombre, precio y stock de una variante publicada en `variantes_producto`.
 class VarianteParaNube {
-  const VarianteParaNube({required this.etiqueta, this.precio});
+  const VarianteParaNube({
+    required this.etiqueta,
+    required this.stock,
+    this.precio,
+  });
 
   final String etiqueta;
+  final int stock;
   final double? precio;
 }
 
@@ -499,6 +503,7 @@ class CatalogoRemoto {
       final datos = <String, dynamic>{
         'nombre': nombre,
         'activo': true,
+        'stock': variante.stock < 0 ? 0 : variante.stock,
       };
       if (precio != null && !precio.isNaN && !precio.isInfinite && precio >= 0) {
         datos['precio_venta'] = precio;

@@ -8,12 +8,12 @@ import 'screens/clients_screen.dart';
 import 'screens/capital_screen.dart';
 import 'screens/stock_screen.dart';
 import 'screens/pedidos_screen.dart';
-import 'screens/precio_btc_widget.dart';
 import 'screens/deudores_screen.dart';
 import 'screens/chat_ia_screen.dart';
 import 'screens/tienda_screen.dart';
 import 'screens/resumen_ventas_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/asistente_bienvenida_screen.dart';
 import 'screens/negocio_inicial_screen.dart';
 import 'screens/configuracion_web_screen.dart';
 import 'screens/equipo_screen.dart';
@@ -21,8 +21,14 @@ import 'screens/actividad_screen.dart';
 import 'screens/categorias_screen.dart';
 import 'screens/cierre_caja_screen.dart';
 import 'screens/compra_screen.dart';
+import 'screens/pais_moneda_screen.dart';
+import 'screens/promocion_pagina_screen.dart';
 import 'screens/tienda_publica_screen.dart';
+import 'services/avisos/avisos_pedido_tienda.dart';
+import 'services/acceso_app.dart';
 import 'services/negocio_local.dart';
+import 'services/ruta_navegador_stub.dart'
+    if (dart.library.js_interop) 'services/ruta_navegador_web.dart';
 import 'services/subdominio_tienda.dart';
 import 'backend/catalogo_remoto.dart';
 import 'backend/negocio_remoto.dart';
@@ -33,15 +39,18 @@ import 'backend/supabase_cliente.dart';
 import 'data/app_database.dart';
 import 'services/sesion_google.dart';
 import 'data/capital_repository.dart';
-import 'data/datos_demo.dart';
 import 'theme/app_theme.dart';
+import 'utils/moneda.dart';
 import 'widgets/fondo_gexi.dart';
 import 'widgets/logo_gexi.dart';
+import 'widgets/soporte_whatsapp.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SupabaseListo.iniciar();
   final database = AppDatabase(openDatabaseConnection());
+  AvisosPedidoTienda.usarBase(database);
+  await AvisosPedidoTienda.iniciar();
   NegocioStore.alPublicar = (negocio) => const NegocioRemoto().publicar(negocio);
   NegocioStore.alGuardarCatalogo = CatalogoRemoto.publicarCategorias;
   CatalogoRemoto.leerProducto = (id) async {
@@ -75,7 +84,10 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final slugPublico = SubdominioTienda.slugDesdeHost(Uri.base.host);
+    final slugPublico = kIsWeb
+        ? (SubdominioTienda.slugDesdeHost(Uri.base.host) ??
+            SubdominioTienda.slugDesdeRuta(rutaDelNavegador()))
+        : null;
     return MaterialApp(
       title: 'Gexi',
       locale: DevicePreview.locale(context),
@@ -103,6 +115,7 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
   SesionGoogle? _sesion;
   NegocioLocal? _negocio;
   bool _lista = false;
+  bool _creando = false;
 
   @override
   void initState() {
@@ -112,7 +125,11 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
 
   Future<void> _recuperar() async {
     final sesion = await AuthGoogle.instancia.leer();
-    final negocio = await NegocioStore().leer();
+    if (sesion != null) {
+      await AuthGoogle.instancia.asegurarSupabase();
+    }
+    final negocio = await _negocioDeEstaCuenta();
+    unawaited(const AccesoApp().anotarSiCorresponde());
     if (!mounted) return;
     setState(() {
       _sesion = sesion;
@@ -121,14 +138,43 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
     });
   }
 
-  Future<void> _entrarConCorreo(String correo) async {
-    final sesion = await AuthGoogle.instancia.entrarConCorreo(correo);
-    final negocio = await NegocioStore().leer();
+  Future<void> _entrarConGoogle(SesionGoogle sesion) async {
+    final negocio = await _negocioDeEstaCuenta();
+    unawaited(const AccesoApp().anotarSiCorresponde());
     if (!mounted) return;
     setState(() {
       _sesion = sesion;
       _negocio = negocio;
     });
+  }
+
+  Future<void> _entrarConCorreo(String correo) async {
+    final sesion = await AuthGoogle.instancia.entrarConCorreo(correo);
+    final negocio = await _negocioDeEstaCuenta();
+    unawaited(const AccesoApp().anotarSiCorresponde());
+    if (!mounted) return;
+    setState(() {
+      _sesion = sesion;
+      _negocio = negocio;
+    });
+  }
+
+  /// El negocio de esta sesión. Si el teléfono tiene el de otra cuenta, busca el de la nube.
+  Future<NegocioLocal?> _negocioDeEstaCuenta() async {
+    final sesion = await AuthGoogle.instancia.leer();
+    final email = sesion?.email ?? '';
+    final actual = await NegocioStore().leer();
+    if (actual != null && _cuentaDelNegocio(actual, email)) return actual;
+    try {
+      final remoto = await const NegocioRemoto().delDueno() ??
+          await const NegocioRemoto().delEquipo();
+      if (remoto != null) {
+        await NegocioStore().guardarLocal(remoto);
+        return remoto;
+      }
+    } catch (_) {}
+    if (actual != null && email.isEmpty) return actual;
+    return null;
   }
 
   @override
@@ -141,7 +187,9 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
     final sesion = _sesion;
     if (sesion == null) {
       return LoginScreen(
-        alEntrar: (nueva) => setState(() => _sesion = nueva),
+        alEntrar: (nueva) {
+          unawaited(_entrarConGoogle(nueva));
+        },
         alContinuar: _entrarConCorreo,
       );
     }
@@ -160,23 +208,30 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
         },
       );
     }
+    final esDueno =
+        negocio != null && _mismoDueno(negocio.duenoEmail, sesion.email);
     final entraComoEmpleado = negocio != null &&
         negocio.configurado &&
         miembro != null &&
         miembro.activo;
-    if (negocio == null ||
-        (!_mismoDueno(negocio.duenoEmail, sesion.email) && !entraComoEmpleado)) {
-      return CrearNegocioScreen(
+    if (_creando ||
+        (negocio != null && esDueno && negocio.necesitaAsistente)) {
+      return AsistenteBienvenidaScreen(
+        key: const ValueKey('asistente-bienvenida'),
+        negocio: esDueno ? negocio : null,
         duenoEmail: sesion.email,
-        alCrear: (creado) => setState(() => _negocio = creado),
-        alUnirse: (unido) => setState(() => _negocio = unido),
+        alActualizar: (actualizado) => setState(() {
+          _negocio = actualizado;
+          _creando = false;
+        }),
+        alVolverAlInicio: () => setState(() => _creando = false),
       );
     }
-    if (!negocio.configurado) {
-      return ConfiguracionAsistidaScreen(
-        negocio: negocio,
+    if (negocio == null || (!esDueno && !entraComoEmpleado)) {
+      return CrearNegocioScreen(
         duenoEmail: sesion.email,
-        alConfirmar: (confirmado) => setState(() => _negocio = confirmado),
+        alEmpezar: () => setState(() => _creando = true),
+        alUnirse: (unido) => setState(() => _negocio = unido),
       );
     }
     return MyHomePage(
@@ -252,6 +307,14 @@ String _textoCodigo(NegocioLocal negocio, String email) {
   return '${miembro.etiquetaRol} · ${miembro.codigo}';
 }
 
+bool _cuentaDelNegocio(NegocioLocal negocio, String email) {
+  final clave = email.trim().toLowerCase();
+  if (clave.isEmpty) return false;
+  if (_mismoDueno(negocio.duenoEmail, clave)) return true;
+  final miembro = negocio.miembroConEmail(clave);
+  return miembro != null && miembro.activo;
+}
+
 bool _mismoDueno(String duenoEmail, String emailSesion) {
   final dueno = duenoEmail.trim().toLowerCase();
   if (dueno.isEmpty) return false;
@@ -287,13 +350,12 @@ class _MyHomePageState extends State<MyHomePage> {
 
   Future<void> _prepararDatos() async {
     try {
-      await sembrarDatosDemoNovaceltec(widget.database);
+      await RemotoComun.enSerie(
+        () => SincronizarNegocio.traer(widget.database),
+      );
     } catch (error) {
       debugPrint('Gexi: no se pudo preparar la muestra: $error');
     }
-    await RemotoComun.enSerie(
-      () => SincronizarNegocio.traer(widget.database),
-    );
   }
 
   Widget _buildScreen(int index) {
@@ -334,12 +396,16 @@ class _MyHomePageState extends State<MyHomePage> {
           alAbrirPagina: () => _abrir(
             ConfiguracionWebScreen(database: widget.database),
           ),
+          alAbrirPromocion: () => _abrir(const PromocionPaginaScreen()),
           alAbrirEquipo: () => _abrir(const EquipoScreen()),
           alAbrirActividad: () =>
               _abrir(ActividadScreen(database: widget.database)),
           alAbrirCategorias: () => _abrir(const CategoriasScreen()),
           alAbrirCompra: () => _abrir(CompraScreen(database: widget.database)),
           alAbrirCierre: () => _abrir(CierreCajaScreen(database: widget.database)),
+          alAbrirPais: () => _abrir(
+            PaisMonedaScreen(database: widget.database),
+          ),
           alCerrarSesion: widget.alCerrarSesion,
         );
       default:
@@ -411,20 +477,24 @@ class _ResumenCapitalCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<ResumenFinancieroPersona>>(
-      future: CapitalRepository(database).listar().then(
-            (movimientos) => CapitalRepository.resumir(
-              movimientos.map(
-                (m) => MovimientoParaResumen(
-                  persona: m.persona,
-                  monto: m.monto,
-                  tipo: m.tipo,
-                ),
-              ),
+    return FutureBuilder<(String, List<ResumenFinancieroPersona>)>(
+      future: () async {
+        final codigo = await monedaDelNegocio();
+        final movimientos = await CapitalRepository(database).listar();
+        final personas = CapitalRepository.resumir(
+          movimientos.map(
+            (m) => MovimientoParaResumen(
+              persona: m.persona,
+              monto: m.monto,
+              tipo: m.tipo,
             ),
           ),
+        );
+        return (codigo, personas);
+      }(),
       builder: (context, snapshot) {
-        final personas = snapshot.data ?? const <ResumenFinancieroPersona>[];
+        final personas = snapshot.data?.$2 ?? const <ResumenFinancieroPersona>[];
+        final moneda = snapshot.data?.$1 ?? monedaPorDefecto;
         return GestureDetector(
           onTap: onTap,
           child: Container(
@@ -461,8 +531,9 @@ class _ResumenCapitalCard extends StatelessWidget {
                             style: Theme.of(context).textTheme.bodyLarge,
                           ),
                           Text(
-                            CapitalRepository.textoMonto(
+                            formatearMoneda(
                               persona.totalEntradas - persona.totalSalidas,
+                              moneda,
                             ),
                             style: Theme.of(context).textTheme.bodyLarge,
                           ),
@@ -519,7 +590,7 @@ class _Inicio extends StatelessWidget {
       children: [
         const Align(
           alignment: Alignment.centerLeft,
-          child: LogoGexi(ancho: 112),
+          child: LogoGexi(ancho: 140),
         ),
         const SizedBox(height: 8),
         Text(
@@ -626,8 +697,6 @@ class _Inicio extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 16),
-        const PrecioBTCWidget(label: 'USDT/ARG'),
         if (_administra(negocio, sesion.email)) ...[
           const SizedBox(height: 16),
           _ResumenCapitalCard(
@@ -716,11 +785,13 @@ class _Mas extends StatelessWidget {
     required this.alAbrirTienda,
     required this.alAbrirVentas,
     required this.alAbrirPagina,
+    required this.alAbrirPromocion,
     required this.alAbrirEquipo,
     required this.alAbrirActividad,
     required this.alAbrirCategorias,
     required this.alAbrirCompra,
     required this.alAbrirCierre,
+    required this.alAbrirPais,
     required this.alCerrarSesion,
   });
 
@@ -733,11 +804,13 @@ class _Mas extends StatelessWidget {
   final VoidCallback alAbrirTienda;
   final VoidCallback alAbrirVentas;
   final VoidCallback alAbrirPagina;
+  final VoidCallback alAbrirPromocion;
   final VoidCallback alAbrirEquipo;
   final VoidCallback alAbrirActividad;
   final VoidCallback alAbrirCategorias;
   final VoidCallback alAbrirCompra;
   final VoidCallback alAbrirCierre;
+  final VoidCallback alAbrirPais;
   final Future<void> Function() alCerrarSesion;
 
   @override
@@ -795,6 +868,8 @@ class _Mas extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
+        const SoporteWhatsapp(),
+        const SizedBox(height: 16),
         Container(
           decoration: AppColors.tarjeta,
           child: Column(
@@ -805,6 +880,8 @@ class _Mas extends StatelessWidget {
               if (_administra(negocio, sesion.email)) ...[
                 const Divider(height: 1, indent: 68),
                 _Opcion(icono: Icons.category_rounded, titulo: 'Categorías', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCategorias),
+                const Divider(height: 1, indent: 68),
+                _Opcion(icono: Icons.currency_exchange_rounded, titulo: 'Cambiar de moneda', color: AppColors.verde, fondo: const Color(0xFFE8F9EE), onTap: alAbrirPais),
                 const Divider(height: 1, indent: 68),
                 _Opcion(icono: Icons.payments_rounded, titulo: 'Capital', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCapital),
                 const Divider(height: 1, indent: 68),
@@ -820,6 +897,8 @@ class _Mas extends StatelessWidget {
                 const Divider(height: 1, indent: 68),
                 _Opcion(icono: Icons.language_rounded, titulo: 'Tu página web', color: AppColors.primario, fondo: AppColors.limaBrillo, onTap: alAbrirPagina),
               ],
+              const Divider(height: 1, indent: 68),
+              _Opcion(icono: Icons.qr_code_2_rounded, titulo: 'Promocioná tu página', color: AppColors.primario, fondo: AppColors.limaBrillo, onTap: alAbrirPromocion),
               const Divider(height: 1, indent: 68),
               _Opcion(icono: Icons.auto_awesome_rounded, titulo: 'Asistente', color: AppColors.verde, fondo: const Color(0xFFE8F9EE), onTap: alAbrirAsistente),
               if (_administra(negocio, sesion.email)) ...[

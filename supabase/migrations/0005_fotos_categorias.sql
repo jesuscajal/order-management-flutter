@@ -266,4 +266,11 @@ create policy productos_fotos_baja
     )
   );
 
+drop policy if exists productos_fotos_publicas on storage.objects;
+create policy productos_fotos_publicas
+  on storage.objects
+  for select
+  to anon
+  using (bucket_id = 'productos');
+
 commit;
