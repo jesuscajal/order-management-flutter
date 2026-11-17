@@ -264,22 +264,14 @@ class _CompraScreenState extends State<CompraScreen> {
   }
 
   int? _entero(String texto) {
-    final limpio = texto.trim().replaceAll(',', '.');
-    if (limpio.isEmpty) return null;
-    final entero = int.tryParse(limpio);
-    if (entero != null) return entero;
-    final decimal = double.tryParse(limpio);
-    if (decimal == null || decimal != decimal.truncateToDouble()) return null;
-    return decimal.toInt();
+    final valor = leerMontoEscrito(texto);
+    if (valor == null || valor != valor.truncateToDouble()) return null;
+    return valor.toInt();
   }
 
   double? _opcional(String texto) {
-    final limpio = texto.trim().replaceAll(',', '.');
-    if (limpio.isEmpty) return null;
-    final valor = double.tryParse(limpio);
-    if (valor == null || valor.isNaN || valor.isInfinite || valor < 0) {
-      return null;
-    }
+    final valor = leerMontoEscrito(texto);
+    if (valor == null || valor < 0) return null;
     return CapitalRepository.enCentavos(valor) / 100;
   }
 

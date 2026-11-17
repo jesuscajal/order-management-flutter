@@ -34,6 +34,7 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
   String _codigoMoneda = monedaPorDefecto;
   PaisLatam? _pais;
   String? _avisandoClave;
+  final _busqueda = TextEditingController();
 
   @override
   void initState() {
@@ -65,6 +66,12 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
       _cargar();
     }
     _cargarCobros();
+  }
+
+  @override
+  void dispose() {
+    _busqueda.dispose();
+    super.dispose();
   }
 
   @override
@@ -682,310 +689,423 @@ class _DeudoresScreenState extends State<DeudoresScreen> {
     );
   }
 
-  Widget _lineaResumen(String etiqueta, String valor, {Color? color}) {
-    final estilo = Theme.of(context).textTheme.bodyLarge;
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(etiqueta, style: estilo),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              valor,
-              textAlign: TextAlign.end,
-              style: color == null ? estilo : estilo?.copyWith(color: color),
-            ),
-          ),
-        ],
-      ),
-    );
+  String _plano(String texto) {
+    const origen = 'áéíóúüñ';
+    const destino = 'aeiouun';
+    var salida = texto.trim().toLowerCase();
+    for (var i = 0; i < origen.length; i++) {
+      salida = salida.replaceAll(origen[i], destino[i]);
+    }
+    return salida;
   }
 
-  Widget _tarjetaTotal() {
-    return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(20),
-      decoration: AppColors.tarjeta,
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).iconTheme.color?.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              Icons.account_balance_wallet,
-              color: Theme.of(context).iconTheme.color,
-              size: 32,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Total Adeudado',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _dinero(_totalGlobalAdeudado),
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.red,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tarjetaResumen() {
-    final resumen = _resumenFinanciero;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
+  Widget _datoResumen(String titulo, String valor, {Color? color}) {
+    return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Resumen financiero',
-            style: Theme.of(context).textTheme.titleLarge,
+            valor,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color ?? AppColors.texto,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+            ),
           ),
-          const SizedBox(height: 12),
-          if (resumen.isEmpty)
-            Text(
-              'Sin movimientos',
-              style: Theme.of(context).textTheme.bodyMedium,
-            )
-          else
-            for (var i = 0; i < resumen.length; i++) ...[
-              if (i > 0) const Divider(),
-              Text(
-                resumen[i].persona,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              _lineaResumen(
-                'Entradas',
-                _dinero(resumen[i].totalEntradas),
-              ),
-              _lineaResumen(
-                'Salidas',
-                _dinero(resumen[i].totalSalidas),
-              ),
-              _lineaResumen(
-                'Pagos / devoluciones',
-                _dinero(resumen[i].totalPagos),
-              ),
-              _lineaResumen(
-                'Saldo de deuda',
-                _dinero(resumen[i].saldoDeuda),
-                color: resumen[i].saldoDeuda > 0 ? Colors.red : null,
-              ),
-            ],
+          const SizedBox(height: 2),
+          Text(
+            titulo,
+            style: const TextStyle(color: AppColors.textoSuave, fontSize: 12),
+          ),
         ],
-      ),
-    );
-  }
-
-  Widget _tarjetaDeudor(ResumenFinancieroPersona deudor) {
-    final detalle = _ultimoDetalle(deudor.persona);
-    final cobra = CapitalRepository.enCentavos(deudor.saldoDeuda) > 0;
-    final dato = _dato(deudor);
-    final clave = CobroLocal.clavePersona(deudor.persona);
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      color: Theme.of(context).cardColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    deudor.persona,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _dinero(deudor.saldoDeuda),
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Colors.red,
-                          ),
-                    ),
-                    if (CapitalRepository.enCentavos(deudor.saldoAPagar) > 0)
-                      Text(
-                        'A pagar ${_dinero(deudor.saldoAPagar)}',
-                        style: const TextStyle(color: AppColors.alerta),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-            if (detalle != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Último movimiento: $detalle',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ],
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () => _mostrarDialogoPago(deudor),
-                icon: const Icon(Icons.payments_outlined, size: 18),
-                label: const Text('Pago parcial'),
-              ),
-            ),
-            if (cobra) ...[
-              const SizedBox(height: 12),
-              if (_estaVencido(deudor))
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 4),
-                  child: Text(
-                    'Vencido',
-                    style: TextStyle(
-                      color: AppColors.alerta,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              Text(
-                dato.fecha == null
-                    ? 'Sin día de cobro'
-                    : 'Día de cobro: ${_fechaTexto(dato.fecha!)}',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              if (dato.telefono.isNotEmpty)
-                Text(
-                  'Teléfono: ${dato.telefono}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              if (dato.fecha != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    onPressed: () => _quitarDia(deudor),
-                    child: const Text('Quitar día'),
-                  ),
-                ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _elegirDia(deudor),
-                  icon: const Icon(Icons.event_outlined, size: 18),
-                  label: Text(
-                    dato.fecha == null ? 'Día de cobro' : 'Cambiar día',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _editarTelefono(deudor),
-                  icon: const Icon(Icons.phone_outlined, size: 18),
-                  label: Text(
-                    dato.telefono.isEmpty ? 'Teléfono' : 'Cambiar teléfono',
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _avisandoClave == clave
-                      ? null
-                      : () => _avisarWhatsApp(deudor),
-                  icon: const FaIcon(FontAwesomeIcons.whatsapp, size: 16),
-                  label: const Text('Avisar por WhatsApp'),
-                ),
-              ),
-            ],
-          ],
-        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final consulta = _plano(_busqueda.text);
     final deudores = [
       for (final deudor in _deudoresConSaldo)
-        if (!_soloVencidos || _estaVencido(deudor)) deudor,
+        if ((!_soloVencidos || _estaVencido(deudor)) &&
+            (consulta.isEmpty || _plano(deudor.persona).contains(consulta)))
+          deudor,
     ];
+    final vencidos = _deudoresConSaldo.where(_estaVencido).length;
+    final buscando = _busqueda.text.trim().isNotEmpty;
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: AppColors.fondoClaro,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(
+        title: const Text(
           'Deudores',
-          style: Theme.of(context).textTheme.titleLarge,
+          style: TextStyle(
+            color: AppColors.texto,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ),
       body: _cargando
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                _tarjetaTotal(),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: FilterChip(
-                      label: const Text('Solo vencidos'),
-                      selected: _soloVencidos,
-                      onSelected: (valor) => setState(() => _soloVencidos = valor),
+                if (_deudoresConSaldo.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    child: TextField(
+                      controller: _busqueda,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar persona',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: buscando
+                            ? IconButton(
+                                tooltip: 'Borrar',
+                                onPressed: () {
+                                  _busqueda.clear();
+                                  setState(() {});
+                                },
+                                icon: const Icon(Icons.close_rounded),
+                              )
+                            : null,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
                     ),
                   ),
-                ),
+                if (_deudoresConSaldo.isNotEmpty)
+                  SizedBox(
+                    height: 52,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: const Text('Todos'),
+                            selected: !_soloVencidos,
+                            onSelected: (_) => setState(() => _soloVencidos = false),
+                          ),
+                        ),
+                        ChoiceChip(
+                          label: const Text('Vencidos'),
+                          selected: _soloVencidos,
+                          onSelected: (_) => setState(() => _soloVencidos = true),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    children: [
-                      _tarjetaResumen(),
-                      if (deudores.isEmpty)
-                        Text(
-                          _soloVencidos
-                              ? 'No hay deudas vencidas'
-                              : 'No hay deudas pendientes',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        )
-                      else
-                        for (final deudor in deudores) _tarjetaDeudor(deudor),
-                    ],
+                  child: RefreshIndicator(
+                    onRefresh: () async {
+                      await _cargar();
+                      await _cargarCobros();
+                    },
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                      children: [
+                        if (_deudoresConSaldo.isNotEmpty && !buscando) ...[
+                          DecoratedBox(
+                            decoration: AppColors.tarjeta,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              child: Row(
+                                children: [
+                                  _datoResumen(
+                                    'Por cobrar',
+                                    _dinero(_totalGlobalAdeudado),
+                                    color: AppColors.alerta,
+                                  ),
+                                  _datoResumen(
+                                    'Personas',
+                                    '${_deudoresConSaldo.length}',
+                                  ),
+                                  _datoResumen(
+                                    'Vencidos',
+                                    '$vencidos',
+                                    color: vencidos == 0
+                                        ? AppColors.verde
+                                        : AppColors.alerta,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
+                        DecoratedBox(
+                          decoration: AppColors.tarjeta,
+                          child: _deudoresConSaldo.isEmpty
+                              ? const Padding(
+                                  padding: EdgeInsets.all(20),
+                                  child: Text(
+                                    'No hay deudas pendientes. Cuando vendas fiado, la persona aparece acá.',
+                                    style: TextStyle(
+                                      color: AppColors.textoSuave,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                )
+                              : deudores.isEmpty
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: Text(
+                                        buscando
+                                            ? 'Ninguna persona coincide con la búsqueda.'
+                                            : 'No hay deudas vencidas.',
+                                        style: const TextStyle(
+                                          color: AppColors.textoSuave,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    )
+                                  : ClipRRect(
+                                      borderRadius: BorderRadius.circular(18),
+                                      child: Column(
+                                        children: [
+                                          for (var i = 0; i < deudores.length; i++) ...[
+                                            if (i > 0)
+                                              const Divider(
+                                                height: 1,
+                                                indent: 66,
+                                                color: AppColors.linea,
+                                              ),
+                                            _filaDeudor(deudores[i]),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
+    );
+  }
+
+  Widget _filaDeudor(ResumenFinancieroPersona deudor) {
+    final inicial = deudor.persona.trim().isEmpty
+        ? '?'
+        : deudor.persona.trim()[0].toUpperCase();
+    final vencido = _estaVencido(deudor);
+    final dato = _dato(deudor);
+    final detalle = vencido
+        ? 'Vencido'
+        : dato.fecha == null
+            ? 'Sin día de cobro'
+            : 'Cobro el ${_fechaTexto(dato.fecha!)}';
+    return InkWell(
+      onTap: () => _abrirDeudor(deudor),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: vencido
+                  ? const Color(0xFFFEE2E2)
+                  : const Color(0xFFE8EEFF),
+              child: Text(
+                inicial,
+                style: TextStyle(
+                  color: vencido ? AppColors.alerta : AppColors.primario,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    deudor.persona,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.texto,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    detalle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: vencido ? AppColors.alerta : AppColors.textoSuave,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              _dinero(deudor.saldoDeuda),
+              style: const TextStyle(
+                color: AppColors.alerta,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _abrirDeudor(ResumenFinancieroPersona deudor) async {
+    final dato = _dato(deudor);
+    final detalle = _ultimoDetalle(deudor.persona);
+    final cobra = CapitalRepository.enCentavos(deudor.saldoDeuda) > 0;
+    final clave = CobroLocal.clavePersona(deudor.persona);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheet) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.linea,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 16, 12, 4),
+                    child: Text(
+                      deudor.persona,
+                      style: const TextStyle(
+                        color: AppColors.texto,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                      ),
+                    ),
+                  ),
+                  _lineaFicha('Te debe', _dinero(deudor.saldoDeuda)),
+                  if (CapitalRepository.enCentavos(deudor.saldoAPagar) > 0)
+                    _lineaFicha('A pagar', _dinero(deudor.saldoAPagar)),
+                  _lineaFicha('Entradas', _dinero(deudor.totalEntradas)),
+                  _lineaFicha('Salidas', _dinero(deudor.totalSalidas)),
+                  _lineaFicha('Pagos', _dinero(deudor.totalPagos)),
+                  if (detalle != null && detalle.isNotEmpty)
+                    _lineaFicha('Último movimiento', detalle),
+                  if (cobra)
+                    _lineaFicha(
+                      'Día de cobro',
+                      dato.fecha == null
+                          ? 'Sin día'
+                          : _fechaTexto(dato.fecha!),
+                    ),
+                  if (dato.telefono.isNotEmpty)
+                    _lineaFicha('Teléfono', dato.telefono),
+                  const Divider(height: 16, color: AppColors.linea),
+                  ListTile(
+                    leading: const Icon(Icons.payments_outlined, color: AppColors.primario),
+                    title: const Text('Pago parcial'),
+                    onTap: () {
+                      Navigator.pop(sheet);
+                      _mostrarDialogoPago(deudor);
+                    },
+                  ),
+                  if (cobra)
+                    ListTile(
+                      leading: const Icon(Icons.event_outlined, color: AppColors.primario),
+                      title: Text(dato.fecha == null ? 'Día de cobro' : 'Cambiar día'),
+                      onTap: () {
+                        Navigator.pop(sheet);
+                        _elegirDia(deudor);
+                      },
+                    ),
+                  if (cobra && dato.fecha != null)
+                    ListTile(
+                      leading: const Icon(Icons.event_busy_outlined, color: AppColors.textoSuave),
+                      title: const Text('Quitar día'),
+                      onTap: () {
+                        Navigator.pop(sheet);
+                        _quitarDia(deudor);
+                      },
+                    ),
+                  if (cobra)
+                    ListTile(
+                      leading: const Icon(Icons.phone_outlined, color: AppColors.primario),
+                      title: Text(dato.telefono.isEmpty ? 'Teléfono' : 'Cambiar teléfono'),
+                      onTap: () {
+                        Navigator.pop(sheet);
+                        _editarTelefono(deudor);
+                      },
+                    ),
+                  if (cobra)
+                    ListTile(
+                      leading: const FaIcon(FontAwesomeIcons.whatsapp, color: AppColors.verde),
+                      title: const Text('Avisar por WhatsApp'),
+                      enabled: _avisandoClave != clave,
+                      onTap: () {
+                        Navigator.pop(sheet);
+                        _avisarWhatsApp(deudor);
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _lineaFicha(String etiqueta, String valor) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 132,
+            child: Text(
+              etiqueta,
+              style: const TextStyle(color: AppColors.textoSuave),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              valor,
+              style: const TextStyle(
+                color: AppColors.texto,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

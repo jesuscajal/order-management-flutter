@@ -2368,8 +2368,7 @@ class _DetalleDialogState extends State<_DetalleDialog> with _ConMoneda {
           ),
           FilledButton(
             onPressed: () {
-              final texto = campo.text.trim().replaceAll(',', '.');
-              final valor = double.tryParse(texto);
+              final valor = leerMontoEscrito(campo.text);
               Navigator.pop(dialogContext, valor);
             },
             child: const Text('Guardar'),
@@ -2674,11 +2673,7 @@ Future<bool> _preguntarCancelar(BuildContext context) async {
   return resultado == true;
 }
 
-double? _parseMonto(String raw) {
-  final texto = raw.trim().replaceAll(',', '.');
-  if (texto.isEmpty) return null;
-  return double.tryParse(texto);
-}
+double? _parseMonto(String raw) => leerMontoEscrito(raw);
 
 String _etiquetaTarjeta(String raw) {
   if (PedidoEstados.leer(raw) == PedidoEstado.confirmado) return 'En proceso';

@@ -70,6 +70,8 @@ class ResumenVentasDatos {
     required this.mesActual,
     required this.topProductosMes,
     required this.ultimasVentas,
+    this.pedidosPaginaHoy = 0,
+    this.pedidosPaginaMes = 0,
   });
 
   final TotalesPeriodo hoy;
@@ -77,6 +79,10 @@ class ResumenVentasDatos {
   final TotalesPeriodo mesActual;
   final List<ProductoMasVendido> topProductosMes;
   final List<VentaReciente> ultimasVentas;
+
+  /// Pedidos con origen tienda, sin los cancelados.
+  final int pedidosPaginaHoy;
+  final int pedidosPaginaMes;
 
   static const vacio = ResumenVentasDatos(
     hoy: TotalesPeriodo.vacio,
@@ -122,6 +128,8 @@ class ResumenVentasConsulta {
     var gananciaHoy = 0.0;
     var ganancia7 = 0.0;
     var gananciaMes = 0.0;
+    var pedidosPaginaHoy = 0;
+    var pedidosPaginaMes = 0;
 
     final agregadoMes = <int, ({String nombre, int unidades})>{};
     final recientes = <VentaReciente>[];
@@ -162,7 +170,10 @@ class ResumenVentasConsulta {
         cant7++;
         if (ganancia != null) ganancia7 += ganancia;
       }
+      final esPagina = (meta?.origen ?? '') == 'tienda';
+      if (esPagina && _mismoDia(fecha, hoy)) pedidosPaginaHoy++;
       if (_enMesCalendario(fecha, ahora)) {
+        if (esPagina) pedidosPaginaMes++;
         totalMes += monto;
         cantMes++;
         if (ganancia != null) gananciaMes += ganancia;
@@ -227,6 +238,8 @@ class ResumenVentasConsulta {
       ),
       topProductosMes: top.take(5).toList(),
       ultimasVentas: recientes,
+      pedidosPaginaHoy: pedidosPaginaHoy,
+      pedidosPaginaMes: pedidosPaginaMes,
     );
   }
 

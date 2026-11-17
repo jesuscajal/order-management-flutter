@@ -3,6 +3,8 @@ import 'dart:convert';
 import '../data/app_database.dart';
 import '../data/capital_repository.dart';
 import '../data/funciones_asistente.dart';
+import '../data/instructivo_funciones.dart';
+import 'instructivo_remoto.dart';
 import '../data/pedido_repository.dart';
 import '../data/stock_repository.dart';
 import '../models/pedido_estado.dart';
@@ -56,6 +58,16 @@ class OrquestadorIa {
     }
 
     final funciones = await NegocioStore().leerFuncionesAsistente();
+    final guias = await const InstructivoRemoto().leer();
+    final ayuda = textoInstructivo(
+      normalizado,
+      consultarStock: funciones.consultarStock,
+      anotarVenta: funciones.anotarVenta,
+      horarioDireccion: funciones.horarioDireccion,
+      ventasHoy: funciones.ventasHoy,
+      guias: guias,
+    );
+    if (ayuda.isNotEmpty) return RespuestaAsistente(ayuda);
 
     if (_esInformeConsumo(normalizado)) {
       return RespuestaAsistente(await _informeConsumo());

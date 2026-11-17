@@ -9,6 +9,7 @@ import '../services/negocio_local.dart';
 import '../services/openai_chat_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/elegir_foto.dart';
+import '../utils/moneda.dart';
 
 /// Categoría, atributos, serie y variantes de un producto (RF 2.3, 2.4 y 2.6).
 class FichaProductoPanel extends StatefulWidget {
@@ -253,7 +254,7 @@ class _FichaProductoPanelState extends State<FichaProductoPanel> {
     );
     final nombre = etiqueta.text.trim();
     final cantidad = int.tryParse(stock.text.trim()) ?? 0;
-    final propio = double.tryParse(precio.text.trim().replaceAll(',', '.'));
+    final propio = leerMontoEscrito(precio.text);
     etiqueta.dispose();
     stock.dispose();
     precio.dispose();

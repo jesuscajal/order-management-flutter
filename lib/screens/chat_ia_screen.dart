@@ -22,6 +22,48 @@ import '../widgets/fondo_gexi.dart';
 /// sin publicar el mismo aviso dos veces.
 class _ConsultaIncompleta implements Exception {}
 
+class _Sugerencia {
+  const _Sugerencia(this.etiqueta, this.texto);
+
+  final String etiqueta;
+  final String texto;
+}
+
+class _PastillaSugerencia extends StatelessWidget {
+  const _PastillaSugerencia({required this.etiqueta, required this.onTap});
+
+  final String etiqueta;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(18),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.linea),
+          ),
+          child: Text(
+            etiqueta,
+            style: const TextStyle(
+              color: AppColors.texto,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _EntradaChat {
   const _EntradaChat(this.mensaje, {this.plan});
 
@@ -111,6 +153,7 @@ class _ChatIaScreenState extends State<ChatIaScreen> {
   Future<void> _enviar() async {
     final texto = _controlador.text.trim();
     if (texto.isEmpty || _enviando) return;
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _enviando = true);
     try {
       await _procesar(texto);
@@ -523,13 +566,13 @@ class _ChatIaScreenState extends State<ChatIaScreen> {
   }
 
   /// Los informes no gastan cupo. "Agregar stock" deja la frase para completar.
-  List<String> _sugerencias() {
+  List<_Sugerencia> _sugerencias() {
     const todas = [
-      '¿Cuánto vendí hoy?',
-      '¿Qué me queda poco?',
-      'Pedidos pendientes',
-      'Agregar stock de ',
-      '¿Quién me debe?',
+      _Sugerencia('Ventas de hoy', '¿Cuánto vendí hoy?'),
+      _Sugerencia('Stock bajo', '¿Qué me queda poco?'),
+      _Sugerencia('Pendientes', 'Pedidos pendientes'),
+      _Sugerencia('Agregar stock', 'Agregar stock de '),
+      _Sugerencia('Deudas', '¿Quién me debe?'),
     ];
     String ultima = '';
     for (var i = _entradas.length - 1; i >= 0; i--) {
@@ -541,7 +584,7 @@ class _ChatIaScreenState extends State<ChatIaScreen> {
     }
     return [
       for (final sugerencia in todas)
-        if (normalizarTexto(sugerencia).trim() != ultima) sugerencia,
+        if (normalizarTexto(sugerencia.texto).trim() != ultima) sugerencia,
     ].take(4).toList();
   }
 
@@ -577,94 +620,141 @@ class _ChatIaScreenState extends State<ChatIaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final teclado = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final sugerencias = _sugerencias();
     return Scaffold(
       backgroundColor: AppColors.fondoClaro,
       appBar: AppBar(
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Asistente'),
-            Text(
-              OpenAiChatService.modelo,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
-            ),
-          ],
-        ),
+        title: const Text('Asistente'),
       ),
       body: FondoGexi(
         child: SizedBox.expand(
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: EdgeInsets.fromLTRB(16, teclado ? 8 : 12, 16, 0),
                 child: GeckoAssistantCard(
                   controller: _gecko,
                   compact: true,
-                  avatarSize: 132,
+                  enBarra: teclado,
+                  avatarSize: teclado ? 44 : 108,
                 ),
               ),
               Expanded(
                 child: ListView.builder(
                   controller: _scroll,
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
                   itemCount: _entradas.length,
                   itemBuilder: (context, index) => _burbuja(_entradas[index]),
                 ),
               ),
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  child: Column(
-                    children: [
-                      if (_planAbierto() == null && !_enviando)
-                        SizedBox(
-                          height: 40,
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            children: [
-                              for (final sugerencia in _sugerencias())
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: ActionChip(
-                                    label: Text(sugerencia),
-                                    onPressed: () =>
-                                        _usarSugerencia(sugerencia),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _controlador,
-                              minLines: 1,
-                              maxLines: 4,
-                              textCapitalization: TextCapitalization.sentences,
-                              textInputAction: TextInputAction.send,
-                              onSubmitted: (_) => _enviar(),
-                              decoration: const InputDecoration(
-                                hintText: 'Informes, o una entrada y una venta',
-                                border: OutlineInputBorder(),
-                              ),
+              DecoratedBox(
+                decoration: const BoxDecoration(
+                  color: AppColors.fondoClaro,
+                  border: Border(top: BorderSide(color: AppColors.linea)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                    child: Column(
+                      children: [
+                        if (_planAbierto() == null &&
+                            !_enviando &&
+                            sugerencias.isNotEmpty)
+                          SizedBox(
+                            height: 36,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: sugerencias.length,
+                              separatorBuilder: (context, index) =>
+                                  const SizedBox(width: 8),
+                              itemBuilder: (context, index) {
+                                final sugerencia = sugerencias[index];
+                                return _PastillaSugerencia(
+                                  etiqueta: sugerencia.etiqueta,
+                                  onTap: () => _usarSugerencia(sugerencia.texto),
+                                );
+                              },
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          IconButton.filled(
-                            onPressed: _enviando ? null : _enviar,
-                            icon: const Icon(Icons.send),
-                          ),
-                        ],
-                      ),
-                    ],
+                        if (_planAbierto() == null &&
+                            !_enviando &&
+                            sugerencias.isNotEmpty)
+                          const SizedBox(height: 8),
+                        _campoMensaje(),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _campoMensaje() {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: AppColors.primario.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _controlador,
+              minLines: 1,
+              maxLines: 4,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _enviar(),
+              style: const TextStyle(color: AppColors.texto, fontSize: 15),
+              decoration: const InputDecoration(
+                hintText: 'Preguntá o anotá una venta',
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.fromLTRB(16, 12, 8, 12),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 4, 4, 4),
+            child: IconButton(
+              onPressed: _enviando ? null : _enviar,
+              style: IconButton.styleFrom(
+                backgroundColor: _enviando
+                    ? AppColors.primario.withValues(alpha: 0.45)
+                    : AppColors.primario,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: AppColors.primario.withValues(alpha: 0.45),
+                disabledForegroundColor: Colors.white,
+                fixedSize: const Size(40, 40),
+                minimumSize: const Size(40, 40),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                iconSize: 20,
+              ),
+              icon: _enviando
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.send_rounded),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -685,7 +775,12 @@ class _ChatIaScreenState extends State<ChatIaScreen> {
         decoration: BoxDecoration(
           gradient: esUsuario ? AppColors.degradadoBarra : null,
           color: esUsuario ? null : Colors.white,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(18),
+            topRight: const Radius.circular(18),
+            bottomLeft: Radius.circular(esUsuario ? 18 : 6),
+            bottomRight: Radius.circular(esUsuario ? 6 : 18),
+          ),
           border: esUsuario ? null : Border.all(color: AppColors.linea),
           boxShadow: esUsuario ? null : AppColors.sombraTarjeta,
         ),
@@ -693,7 +788,10 @@ class _ChatIaScreenState extends State<ChatIaScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(mensaje.content, style: TextStyle(color: colorTexto)),
+            Text(
+              mensaje.content,
+              style: TextStyle(color: colorTexto, fontSize: 15, height: 1.35),
+            ),
             if (plan != null && plan.resultado != null) ...[
               const SizedBox(height: 8),
               Text(

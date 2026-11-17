@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:image_picker/image_picker.dart';
@@ -142,6 +144,7 @@ class _TiendaPublicaScreenState extends State<TiendaPublicaScreen> {
               ? _textoPublico(remoto, 'tipo')
               : _textoPublico(remoto, 'tipoTienda'),
         );
+        unawaited(_anotarVisita(remoto.slug));
       }
     }
     if (negocio == null) {
@@ -367,6 +370,20 @@ class _TiendaPublicaScreenState extends State<TiendaPublicaScreen> {
             precio: variante.precio ?? producto.precioVenta,
           ),
     ];
+  }
+
+  /// Una consulta por navegador y mes. Si falla el aviso, se puede reintentar.
+  Future<void> _anotarVisita(String slug) async {
+    final limpio = slug.trim().toLowerCase();
+    if (limpio.isEmpty) return;
+    final ahora = DateTime.now();
+    final clave = 'visita-pagina-$limpio-${ahora.year}-${ahora.month}';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getBool(clave) == true) return;
+      final anoto = await const TiendaPublicaRemota().registrarVisita(limpio);
+      if (anoto) await prefs.setBool(clave, true);
+    } catch (_) {}
   }
 
   Future<_ResultadoLocal> _buscarLocal() async {

@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../backend/capital_remoto.dart';
+import '../utils/moneda.dart';
 import '../backend/stock_remoto.dart';
 import 'app_database.dart';
 
@@ -293,12 +294,11 @@ class CapitalRepository {
 
   /// Lee el texto del formulario. Rechaza vacío o que no sea un número.
   static double leerMontoPago(String texto) {
-    final limpio = texto.trim().replaceAll(',', '.');
-    if (limpio.isEmpty) {
+    if (texto.trim().isEmpty) {
       throw PagoParcialInvalido('Ingresá un monto.');
     }
-    final monto = double.tryParse(limpio);
-    if (monto == null || monto.isNaN || monto.isInfinite) {
+    final monto = leerMontoEscrito(texto);
+    if (monto == null) {
       throw PagoParcialInvalido('El monto no es válido.');
     }
     return monto;
@@ -525,12 +525,9 @@ class TotalesCierreCaja {
   /// Vacío no es un error: todavía no contó. Un texto que no es un número
   /// mayor o igual a cero sí lo es.
   static double? leerContado(String texto) {
-    final limpio = texto.trim().replaceAll(',', '.');
-    if (limpio.isEmpty) return null;
-    final valor = double.tryParse(limpio);
-    if (valor == null || valor.isNaN || valor.isInfinite || valor < 0) {
-      return null;
-    }
+    if (texto.trim().isEmpty) return null;
+    final valor = leerMontoEscrito(texto);
+    if (valor == null || valor < 0) return null;
     return CapitalRepository.enCentavos(valor) / 100;
   }
 

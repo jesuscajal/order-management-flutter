@@ -66,9 +66,20 @@ class _ActividadScreenState extends State<ActividadScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final visibles = _visibles;
     return Scaffold(
       backgroundColor: AppColors.fondoClaro,
-      appBar: AppBar(title: const Text('Actividad')),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text(
+          'Actividad',
+          style: TextStyle(
+            color: AppColors.texto,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
       body: FondoGexi(
         child: widget.database == null
             ? const Center(
@@ -81,57 +92,66 @@ class _ActividadScreenState extends State<ActividadScreen> {
                 onRefresh: _cargar,
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                   children: [
-                    const Text(
-                      'Registro de cambios de este dispositivo. Solo se agregan filas nuevas.',
-                      style: TextStyle(color: AppColors.textoSuave, height: 1.35),
-                    ),
-                    const SizedBox(height: 12),
                     TextField(
-                      decoration: const InputDecoration(
-                        labelText: 'Usuario',
-                        prefixIcon: Icon(Icons.person_outline),
-                      ),
                       onChanged: (valor) => setState(() => _actor = valor),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final periodo in const ['todo', 'hoy', 'semana'])
-                          ChoiceChip(
-                            label: Text(periodo == 'todo'
-                                ? 'Todas las fechas'
-                                : periodo == 'hoy'
-                                    ? 'Hoy'
-                                    : '7 días'),
-                            selected: _periodo == periodo,
-                            onSelected: (_) => setState(() => _periodo = periodo),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final ambito in const ['', 'pedido', 'stock', 'capital', 'producto', 'comprobante'])
-                          ChoiceChip(
-                            label: Text(ambito.isEmpty ? 'Todo' : ambito),
-                            selected: _ambito == ambito,
-                            onSelected: (_) => setState(() => _ambito = ambito),
-                          ),
-                      ],
+                      decoration: const InputDecoration(
+                        hintText: 'Buscar persona',
+                        prefixIcon: Icon(Icons.search_rounded),
+                        isDense: true,
+                      ),
                     ),
                     const SizedBox(height: 12),
+                    SizedBox(
+                      height: 36,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          for (final periodo in const ['todo', 'hoy', 'semana'])
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(_etiquetaPeriodo(periodo)),
+                                selected: _periodo == periodo,
+                                onSelected: (_) =>
+                                    setState(() => _periodo = periodo),
+                              ),
+                            ),
+                          for (final ambito in const [
+                            '',
+                            'pedido',
+                            'stock',
+                            'capital',
+                            'cliente',
+                            'producto',
+                            'comprobante',
+                          ])
+                            Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: ChoiceChip(
+                                label: Text(
+                                  ambito.isEmpty ? 'Todo' : _etiquetaAmbito(ambito),
+                                ),
+                                selected: _ambito == ambito,
+                                onSelected: (_) => setState(() => _ambito = ambito),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
                     if (_error != null)
-                      Text(_error!, style: const TextStyle(color: AppColors.alerta)),
+                      Text(
+                        _error!,
+                        style: const TextStyle(color: AppColors.alerta),
+                      ),
                     if (_cargando && _hechos.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 40),
                         child: Center(child: CircularProgressIndicator()),
                       )
-                    else if (_visibles.isEmpty)
+                    else if (visibles.isEmpty)
                       const Padding(
                         padding: EdgeInsets.symmetric(vertical: 32),
                         child: Text(
@@ -141,12 +161,38 @@ class _ActividadScreenState extends State<ActividadScreen> {
                         ),
                       )
                     else
-                      for (final hecho in _visibles) _tarjeta(hecho),
+                      DecoratedBox(
+                        decoration: AppColors.tarjeta,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Column(
+                            children: [
+                              for (var i = 0; i < visibles.length; i++) ...[
+                                if (i > 0)
+                                  const Divider(
+                                    height: 1,
+                                    indent: 66,
+                                    color: AppColors.linea,
+                                  ),
+                                _fila(visibles[i]),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
       ),
     );
+  }
+
+  String _etiquetaPeriodo(String periodo) {
+    return switch (periodo) {
+      'hoy' => 'Hoy',
+      'semana' => '7 días',
+      _ => 'Todas',
+    };
   }
 
   List<HechoActividad> get _visibles {
@@ -174,35 +220,91 @@ class _ActividadScreenState extends State<ActividadScreen> {
     }
   }
 
-  Widget _tarjeta(HechoActividad hecho) {
+  Widget _fila(HechoActividad hecho) {
     final local = hecho.fecha.toLocal();
     final hora =
-        '${local.day}/${local.month} ${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: AppColors.tarjeta,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        '${local.day.toString().padLeft(2, '0')}/${local.month.toString().padLeft(2, '0')} '
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    final color = _colorAmbito(hecho.ambito);
+    final actor = hecho.actor.trim();
+    final detalle = actor.isEmpty || hecho.detalle.contains(actor)
+        ? hecho.detalle
+        : '$actor · ${hecho.detalle}';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
         children: [
-          Text(hora, style: const TextStyle(color: AppColors.textoSuave, fontSize: 12)),
-          const SizedBox(height: 4),
-          Text(
-            hecho.titulo,
-            style: const TextStyle(
-              color: AppColors.texto,
-              fontWeight: FontWeight.w800,
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(_iconoAmbito(hecho.ambito), color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  hecho.titulo,
+                  style: const TextStyle(
+                    color: AppColors.texto,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detalle,
+                  style: const TextStyle(color: AppColors.textoSuave, fontSize: 13),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 2),
-          Text(hecho.detalle, style: const TextStyle(color: AppColors.texto)),
-          if (hecho.actor.isNotEmpty)
-            Text(
-              hecho.actor,
-              style: const TextStyle(color: AppColors.textoSuave, fontSize: 12),
-            ),
+          const SizedBox(width: 8),
+          Text(
+            hora,
+            style: const TextStyle(color: AppColors.textoSuave, fontSize: 12),
+          ),
         ],
       ),
     );
   }
+}
+
+String _etiquetaAmbito(String ambito) {
+  return switch (ambito) {
+    'pedido' => 'Pedidos',
+    'stock' => 'Stock',
+    'capital' => 'Capital',
+    'cliente' => 'Clientes',
+    'producto' => 'Productos',
+    'comprobante' => 'Comprobantes',
+    _ => ambito,
+  };
+}
+
+IconData _iconoAmbito(String ambito) {
+  return switch (ambito) {
+    'pedido' => Icons.receipt_long_rounded,
+    'stock' => Icons.inventory_2_outlined,
+    'capital' => Icons.payments_rounded,
+    'cliente' => Icons.person_outline_rounded,
+    'producto' => Icons.sell_outlined,
+    'comprobante' => Icons.image_outlined,
+    _ => Icons.history_rounded,
+  };
+}
+
+Color _colorAmbito(String ambito) {
+  return switch (ambito) {
+    'pedido' => AppColors.primario,
+    'stock' => const Color(0xFFD97706),
+    'capital' => AppColors.lima,
+    'cliente' => AppColors.teal,
+    'comprobante' => AppColors.azulProfundo,
+    _ => AppColors.primario,
+  };
 }

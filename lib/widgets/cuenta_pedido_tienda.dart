@@ -464,7 +464,7 @@ Future<SesionCuentaPedido> _crearCuenta(String correo, String clave) async {
     nombre: nombre,
     aviso: conSesion
         ? ''
-        : 'Te enviamos un correo para confirmar la cuenta. Podés seguir y confirmar tu nombre y tu WhatsApp.',
+        : 'Te enviamos un correo para activar la cuenta. Abrilo y después entrá con este correo.',
   );
 }
 
@@ -536,7 +536,7 @@ String _traducirAuth(AuthException error, {required bool alta}) {
   }
   if (codigo == 'email_not_confirmed' ||
       mensaje.contains('email not confirmed')) {
-    return 'Confirmá el correo antes de ingresar. Revisá tu bandeja.';
+    return 'Activá la cuenta desde el correo antes de ingresar. Revisá tu bandeja.';
   }
   if (codigo == 'weak_password' ||
       mensaje.contains('password should be') ||

@@ -9,11 +9,13 @@ class GeckoAssistantCard extends StatelessWidget {
     super.key,
     required this.controller,
     this.compact = false,
+    this.enBarra = false,
     this.avatarSize,
   });
 
   final GeckoAssistantController controller;
   final bool compact;
+  final bool enBarra;
   final double? avatarSize;
 
   @override
@@ -30,11 +32,57 @@ class GeckoAssistantCard extends StatelessWidget {
                 ? const Color(0xFF15994D)
                 : const Color(0xFF0879BF);
 
+        if (enBarra) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFDCECF5)),
+            ),
+            child: Row(
+              children: [
+                GeckoAnimatedAvatar(mood: mood, size: avatarSize ?? 44),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    mood.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF102649),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: stateColor.withAlpha(26),
+                    borderRadius: BorderRadius.circular(100),
+                  ),
+                  child: Text(
+                    mood.label,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: stateColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
         return Container(
           width: double.infinity,
           padding: EdgeInsets.symmetric(
-            horizontal: compact ? 18 : 22,
-            vertical: compact ? 18 : 24,
+            horizontal: compact ? 16 : 22,
+            vertical: compact ? 12 : 24,
           ),
           decoration: BoxDecoration(
             color: Colors.white,

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import '../../utils/moneda.dart';
+
 /// Acciones que el asistente deja pendientes hasta que la persona confirma.
 ///
 /// El modelo solo propone. Este plan no toca la base.
@@ -523,17 +525,4 @@ int? _entero(Object? raw) {
   return leerCantidadTexto(raw);
 }
 
-double? _numeroPlano(String raw) {
-  var texto = raw.trim();
-  if (texto.isEmpty) return null;
-  if (texto.contains(',') && texto.contains('.')) {
-    if (texto.lastIndexOf(',') > texto.lastIndexOf('.')) {
-      texto = texto.replaceAll('.', '').replaceAll(',', '.');
-    } else {
-      texto = texto.replaceAll(',', '');
-    }
-  } else if (texto.contains(',')) {
-    texto = texto.replaceAll(',', '.');
-  }
-  return double.tryParse(texto);
-}
+double? _numeroPlano(String raw) => leerMontoEscrito(raw);

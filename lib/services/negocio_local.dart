@@ -773,6 +773,7 @@ class NegocioStore {
   Future<NegocioLocal> unirEmpleado({
     required String codigo,
     required String email,
+    String nombre = '',
   }) async {
     final actual = await leer();
     if (actual == null || !actual.configurado) {
@@ -816,7 +817,10 @@ class NegocioStore {
     final copia = [
       for (final item in actual.equipo)
         item.codigo.toUpperCase() == clave
-            ? item.copiar(email: emailLimpio)
+            ? item.copiar(
+                email: emailLimpio,
+                nombre: nombre.trim().isEmpty ? item.nombre : nombre.trim(),
+              )
             : item,
     ];
     final actualizado = actual.copiar(equipo: copia);

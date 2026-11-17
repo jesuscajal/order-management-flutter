@@ -499,3 +499,42 @@ Para cerrarlos frente a un usuario falta:
 - Pegar la plantilla del correo de bienvenida en Supabase Auth.
 - Guardar la ubicación y las categorías de los negocios.
 - Configurar Firebase, para el aviso con la app cerrada.
+
+## 4. Requerimientos futuros
+
+Anotados el 15 de noviembre de 2026. No entran en el promedio de los 51 ítems de arriba: todavía no hay código ni migración. El número de WhatsApp del negocio sigue abriendo la app de WhatsApp por fuera.
+
+### RF-36. Bandeja de WhatsApp del negocio
+
+- **Prioridad:** Could.
+- **Descripción:** El sistema debe recibir y enviar los mensajes del número de WhatsApp Business del local dentro de Gexi. El número es del negocio. Cada negocio conecta el suyo. El cliente escribe a ese número y la respuesta sale por el mismo.
+- **Criterio de aceptación:** Un mensaje entrante queda en la bandeja de ese negocio y no en la de otro. Una respuesta enviada desde Gexi le llega al cliente desde el número del local. El número deja de atenderse desde la app de WhatsApp del celular.
+- **Estado:** Pendiente.
+- **Avance:** 0 %.
+- **Nota:** Hace falta una cuenta de Meta Business, el número registrado en la API de WhatsApp Business y un punto en Supabase que reciba los mensajes. Si el cliente escribió primero, se puede contestar con texto libre durante 24 horas. Para escribirle primero hace falta una plantilla aprobada por Meta.
+
+### RF-37. Varios empleados en la misma bandeja
+
+- **Prioridad:** Could.
+- **Descripción:** El sistema debe permitir que el dueño, un administrador y los vendedores respondan los mensajes del mismo número, cada uno con su usuario de Gexi. El cliente no debe ver quién del equipo escribió.
+- **Criterio de aceptación:** Dos empleados del mismo negocio ven la bandeja. Un chat tomado queda a nombre de quien lo agarró y otro empleado no escribe encima. El administrador ve toda la bandeja. Un vendedor ve los chats que tomó y los que nadie tomó. Un empleado de otro negocio no ve esos mensajes.
+- **Estado:** Pendiente.
+- **Avance:** 0 %.
+- **Nota:** No se resuelve compartiendo la sesión de la app de WhatsApp. El equipo entra con el código de empleado que ya existe.
+
+### RF-38. Agente que responde con los datos del negocio
+
+- **Prioridad:** Could.
+- **Descripción:** El sistema debe responder solo, con los datos públicos del negocio, mientras nadie tomó el chat. Debe usar el nombre del negocio, los productos, el precio de venta y si hay stock. Si no encuentra el dato, debe decirlo y dejar el chat para una persona. Si el cliente pide hablar con alguien, o un empleado toma el chat, el agente debe dejar de responder.
+- **Criterio de aceptación:** Una pregunta por un producto cargado responde el precio de venta y si hay stock, sin inventar. Una pregunta por un producto que no existe no inventa un precio y el chat queda para el equipo. Al tomar el chat, el mensaje siguiente lo escribe la persona y el agente no contesta.
+- **Estado:** Pendiente.
+- **Avance:** 0 %.
+- **Nota:** Es otro agente que el asistente de adentro. El de adentro puede ver capital, costos y cargar mercadería. Este solo habla con el cliente.
+
+### RNF-17. El agente del cliente no lee datos privados
+
+- **Prioridad:** Could.
+- **Descripción:** El sistema debe impedir que el agente que habla por WhatsApp lea o mencione deudas de otras personas, precios de costo, capital o datos del equipo.
+- **Criterio de aceptación:** Una pregunta del cliente por el costo, la caja o la deuda de otra persona no devuelve ese dato. La respuesta solo puede salir del catálogo público, el precio de venta, la disponibilidad y los datos públicos del negocio.
+- **Estado:** Pendiente.
+- **Avance:** 0 %.

@@ -123,6 +123,26 @@ class _CategoriasScreenState extends State<CategoriasScreen> {
 
   Future<void> _borrar(int indice) async {
     final nombre = _categorias[indice];
+    final seguro = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Eliminar categoría'),
+        content: Text('¿Seguro que querés eliminar "$nombre"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.alerta),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (seguro != true || !mounted) return;
     final doc = await const AmpliacionLocal().cargar();
     final usada = doc.fichas.values.any(
       (ficha) => ficha.todas.any(

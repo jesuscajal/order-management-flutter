@@ -366,11 +366,7 @@ class _CapitalScreenState extends State<CapitalScreen> {
     });
   }
 
-  double? _parseMonto(String raw) {
-    final limpio = raw.trim().replaceAll(',', '.');
-    if (limpio.isEmpty) return null;
-    return double.tryParse(limpio);
-  }
+  double? _parseMonto(String raw) => leerMontoEscrito(raw);
 
   String _mes(int m) {
     const meses = [

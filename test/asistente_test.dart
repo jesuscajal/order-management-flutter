@@ -7,6 +7,7 @@ import 'package:gestion_pedidos/services/openai_chat_service.dart';
 import 'package:gestion_pedidos/services/orquestador_ia.dart';
 import 'package:gestion_pedidos/services/asistente/resumen_asistente.dart';
 import 'package:gestion_pedidos/data/funciones_asistente.dart';
+import 'package:gestion_pedidos/data/instructivo_funciones.dart';
 import 'package:gestion_pedidos/services/prompts_asistente.dart';
 
 void main() {
@@ -118,6 +119,29 @@ void main() {
       expect(texto, isNot(contains('ventas:')));
       expect(texto, isNot(contains('ventas de hoy')));
       expect(texto, contains('entradas de stock'));
+    });
+
+    test('cómo usar el stock se responde con el instructivo', () {
+      final texto = textoInstructivo(
+        'como agrego stock',
+        consultarStock: true,
+        anotarVenta: true,
+        horarioDireccion: true,
+        ventasHoy: true,
+      );
+      expect(texto, contains('Añadir stock'));
+      expect(texto, isNot(contains('apagada')));
+    });
+
+    test('si el asistente está apagado, el instructivo lo avisa', () {
+      final texto = textoInstructivo(
+        'como uso el asistente',
+        consultarStock: true,
+        anotarVenta: false,
+        horarioDireccion: true,
+        ventasHoy: true,
+      );
+      expect(texto, contains('apagada'));
     });
 
     test('sin interruptores guardados, las funciones quedan prendidas', () {

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:device_preview/device_preview.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'data/database_connection.dart';
@@ -20,7 +21,6 @@ import 'screens/equipo_screen.dart';
 import 'screens/actividad_screen.dart';
 import 'screens/categorias_screen.dart';
 import 'screens/cierre_caja_screen.dart';
-import 'screens/compra_screen.dart';
 import 'screens/pais_moneda_screen.dart';
 import 'screens/promocion_pagina_screen.dart';
 import 'screens/tienda_publica_screen.dart';
@@ -38,10 +38,12 @@ import 'backend/sincronizar_negocio.dart';
 import 'backend/supabase_cliente.dart';
 import 'data/app_database.dart';
 import 'services/sesion_google.dart';
-import 'data/capital_repository.dart';
+import 'data/resumen_ventas.dart';
+import 'backend/tienda_publica_remota.dart';
 import 'theme/app_theme.dart';
 import 'utils/moneda.dart';
 import 'widgets/fondo_gexi.dart';
+import 'widgets/dialogo_borrar_cuenta.dart';
 import 'widgets/logo_gexi.dart';
 import 'widgets/soporte_whatsapp.dart';
 
@@ -68,7 +70,7 @@ void main() async {
 
   runApp(
     DevicePreview(
-      enabled: !kReleaseMode,
+      enabled: !kReleaseMode && !kIsWeb,
       builder: (context) => MyApp(database: database),
     ),
   );
@@ -91,13 +93,66 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Gexi',
       locale: DevicePreview.locale(context),
-      builder: DevicePreview.appBuilder,
+      builder: (context, child) {
+        final contenido = child ?? const SizedBox.shrink();
+        return DevicePreview.appBuilder(
+          context,
+          slugPublico == null ? _MarcoPc(child: contenido) : contenido,
+        );
+      },
       theme: buildLightTheme(),
       darkTheme: buildDarkTheme(),
       themeMode: ThemeMode.light,
       home: slugPublico == null
           ? _PuertaAcceso(database: database)
           : TiendaPublicaScreen(slug: slugPublico),
+    );
+  }
+}
+
+/// En una computadora el negocio se usa en una columna. En el celular ocupa toda la pantalla.
+class _MarcoPc extends StatelessWidget {
+  const _MarcoPc({required this.child});
+
+  final Widget child;
+
+  static const _ancho = 440.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, limites) {
+        final ancho = limites.maxWidth;
+        if (ancho < 760 || !ancho.isFinite) return child;
+        final alto = limites.maxHeight;
+        return ColoredBox(
+          color: const Color(0xFFE7EEF2),
+          child: Center(
+            child: SizedBox(
+              width: _ancho,
+              height: alto,
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  size: Size(_ancho, alto),
+                ),
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Color(0x1A0E3154),
+                        blurRadius: 28,
+                        offset: Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -116,6 +171,7 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
   NegocioLocal? _negocio;
   bool _lista = false;
   bool _creando = false;
+  String _whatsappDueno = '';
 
   @override
   void initState() {
@@ -124,7 +180,14 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
   }
 
   Future<void> _recuperar() async {
-    final sesion = await AuthGoogle.instancia.leer();
+    var sesion = await AuthGoogle.instancia.leer();
+    if (sesion == null) {
+      final usuario = SupabaseListo.cliente?.auth.currentUser;
+      final email = usuario?.email?.trim() ?? '';
+      if (email.isNotEmpty && usuario?.emailConfirmedAt != null) {
+        sesion = await AuthGoogle.instancia.entrarConCorreo(email);
+      }
+    }
     if (sesion != null) {
       await AuthGoogle.instancia.asegurarSupabase();
     }
@@ -220,6 +283,7 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
         key: const ValueKey('asistente-bienvenida'),
         negocio: esDueno ? negocio : null,
         duenoEmail: sesion.email,
+        whatsappInicial: _whatsappDueno,
         alActualizar: (actualizado) => setState(() {
           _negocio = actualizado;
           _creando = false;
@@ -230,7 +294,10 @@ class _PuertaAccesoState extends State<_PuertaAcceso> {
     if (negocio == null || (!esDueno && !entraComoEmpleado)) {
       return CrearNegocioScreen(
         duenoEmail: sesion.email,
-        alEmpezar: () => setState(() => _creando = true),
+        alEmpezar: (whatsapp) => setState(() {
+          _creando = true;
+          _whatsappDueno = whatsapp;
+        }),
         alUnirse: (unido) => setState(() => _negocio = unido),
       );
     }
@@ -376,7 +443,6 @@ class _MyHomePageState extends State<MyHomePage> {
             ConfiguracionWebScreen(database: widget.database),
           ),
           alAbrirCategorias: () => _abrir(const CategoriasScreen()),
-          alAbrirCompra: () => _abrir(CompraScreen(database: widget.database)),
           alAbrirCierre: () => _abrir(CierreCajaScreen(database: widget.database)),
         );
       case 1:
@@ -401,12 +467,12 @@ class _MyHomePageState extends State<MyHomePage> {
           alAbrirActividad: () =>
               _abrir(ActividadScreen(database: widget.database)),
           alAbrirCategorias: () => _abrir(const CategoriasScreen()),
-          alAbrirCompra: () => _abrir(CompraScreen(database: widget.database)),
           alAbrirCierre: () => _abrir(CierreCajaScreen(database: widget.database)),
           alAbrirPais: () => _abrir(
             PaisMonedaScreen(database: widget.database),
           ),
           alCerrarSesion: widget.alCerrarSesion,
+          alBorrarCuenta: _borrarCuenta,
         );
       default:
         return const Center(child: Text('Pantalla no encontrada'));
@@ -427,6 +493,19 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void _abrirAsistente() {
     _abrir(ChatIaScreen(database: widget.database));
+  }
+
+  Future<void> _borrarCuenta() async {
+    final confirmo = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const DialogoBorrarCuenta(),
+    );
+    if (confirmo != true || !mounted) return;
+    await widget.database.vaciar();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    await widget.alCerrarSesion();
   }
 
   @override
@@ -466,87 +545,175 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-class _ResumenCapitalCard extends StatelessWidget {
-  const _ResumenCapitalCard({
+class _ResumenVentasInicio extends StatefulWidget {
+  const _ResumenVentasInicio({
     required this.database,
+    required this.slug,
     required this.onTap,
   });
 
   final AppDatabase database;
+  final String slug;
   final VoidCallback onTap;
 
   @override
+  State<_ResumenVentasInicio> createState() => _ResumenVentasInicioState();
+}
+
+class _ResumenVentasInicioState extends State<_ResumenVentasInicio> {
+  late final Future<_CifrasInicio> _carga;
+
+  @override
+  void initState() {
+    super.initState();
+    _carga = _cargar();
+  }
+
+  Future<_CifrasInicio> _cargar() async {
+    final codigo = await monedaDelNegocio();
+    final ventas = await ResumenVentasConsulta(widget.database).cargar(
+      limiteUltimas: 1,
+    );
+    final visitas = await const TiendaPublicaRemota().visitasDeMiPagina(
+      widget.slug,
+    );
+    return _CifrasInicio(moneda: codigo, ventas: ventas, visitas: visitas);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return FutureBuilder<(String, List<ResumenFinancieroPersona>)>(
-      future: () async {
-        final codigo = await monedaDelNegocio();
-        final movimientos = await CapitalRepository(database).listar();
-        final personas = CapitalRepository.resumir(
-          movimientos.map(
-            (m) => MovimientoParaResumen(
-              persona: m.persona,
-              monto: m.monto,
-              tipo: m.tipo,
-            ),
-          ),
-        );
-        return (codigo, personas);
-      }(),
+    return FutureBuilder<_CifrasInicio>(
+      future: _carga,
       builder: (context, snapshot) {
-        final personas = snapshot.data?.$2 ?? const <ResumenFinancieroPersona>[];
-        final moneda = snapshot.data?.$1 ?? monedaPorDefecto;
-        return GestureDetector(
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: AppColors.tarjeta,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Resumen del capital',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                if (snapshot.connectionState == ConnectionState.waiting &&
-                    personas.isEmpty)
-                  Text(
-                    'Cargando...',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  )
-                else if (personas.isEmpty)
-                  Text(
-                    'Todavía no hay movimientos.',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  )
-                else
-                  for (final persona in personas.take(4))
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            persona.persona,
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                          Text(
-                            formatearMoneda(
-                              persona.totalEntradas - persona.totalSalidas,
-                              moneda,
-                            ),
-                            style: Theme.of(context).textTheme.bodyLarge,
-                          ),
-                        ],
-                      ),
-                    ),
-              ],
+        final cifras = snapshot.data;
+        final moneda = cifras?.moneda ?? monedaPorDefecto;
+        final ventas = cifras?.ventas ?? ResumenVentasDatos.vacio;
+        final visitas = cifras?.visitas ?? (hoy: 0, mes: 0);
+        return DecoratedBox(
+          decoration: AppColors.tarjeta,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: widget.onTap,
+              child: Column(
+                children: [
+                  _filaInicio(
+                    icono: Icons.today_rounded,
+                    color: AppColors.primario,
+                    titulo: 'Hoy',
+                    detalle: _pedidos(ventas.hoy.cantidadPedidos),
+                    valor: formatearMoneda(ventas.hoy.monto, moneda),
+                  ),
+                  const Divider(height: 1, indent: 36, color: AppColors.linea),
+                  _filaInicio(
+                    icono: Icons.calendar_month_rounded,
+                    color: AppColors.lima,
+                    titulo: 'Este mes',
+                    detalle: _pedidos(ventas.mesActual.cantidadPedidos),
+                    valor: formatearMoneda(ventas.mesActual.monto, moneda),
+                  ),
+                  const Divider(height: 1, indent: 36, color: AppColors.linea),
+                  _filaInicio(
+                    icono: Icons.visibility_outlined,
+                    color: AppColors.teal,
+                    titulo: 'Visitantes web',
+                    detalle: 'este mes',
+                    valor: '${visitas.mes}',
+                  ),
+                  const Divider(height: 1, indent: 36, color: AppColors.linea),
+                  _filaInicio(
+                    icono: Icons.shopping_bag_outlined,
+                    color: AppColors.azulProfundo,
+                    titulo: 'Pedidos',
+                    detalle: _pedidos(ventas.pedidosPaginaHoy, prefijo: 'hoy'),
+                    valor: '${ventas.pedidosPaginaMes}',
+                  ),
+                ],
+              ),
             ),
           ),
         );
       },
     );
   }
+
+  String _pedidos(int cantidad, {String prefijo = ''}) {
+    final texto = cantidad == 1 ? '1 pedido' : '$cantidad pedidos';
+    return prefijo.isEmpty ? texto : '$texto $prefijo';
+  }
+
+  Widget _filaInicio({
+    required IconData icono,
+    required Color color,
+    required String titulo,
+    required String detalle,
+    required String valor,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      child: Row(
+        children: [
+          Icon(icono, color: color, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.texto,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                Text(
+                  detalle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: AppColors.textoSuave, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Text(
+                  valor,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: AppColors.texto,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CifrasInicio {
+  const _CifrasInicio({
+    required this.moneda,
+    required this.ventas,
+    required this.visitas,
+  });
+
+  final String moneda;
+  final ResumenVentasDatos ventas;
+  final ({int hoy, int mes}) visitas;
 }
 
 class _Inicio extends StatelessWidget {
@@ -563,7 +730,6 @@ class _Inicio extends StatelessWidget {
     required this.alAbrirVentas,
     required this.alAbrirPagina,
     required this.alAbrirCategorias,
-    required this.alAbrirCompra,
     required this.alAbrirCierre,
   });
 
@@ -579,7 +745,6 @@ class _Inicio extends StatelessWidget {
   final VoidCallback alAbrirVentas;
   final VoidCallback alAbrirPagina;
   final VoidCallback alAbrirCategorias;
-  final VoidCallback alAbrirCompra;
   final VoidCallback alAbrirCierre;
 
   @override
@@ -588,11 +753,23 @@ class _Inicio extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
       children: [
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: LogoGexi(ancho: 140),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const LogoGexi(ancho: 108),
+            if (_administra(negocio, sesion.email)) ...[
+              const SizedBox(width: 12),
+              Expanded(
+                child: _ResumenVentasInicio(
+                  database: database,
+                  slug: negocio.slug,
+                  onTap: alAbrirVentas,
+                ),
+              ),
+            ],
+          ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 16),
         Text(
           'Hola, ${sesion.saludo}',
           style: tema.textTheme.headlineSmall,
@@ -661,15 +838,6 @@ class _Inicio extends StatelessWidget {
             ),
             if (_administra(negocio, sesion.email))
               _Acceso(
-                icono: Icons.shopping_bag_rounded,
-                titulo: 'Compra',
-                detalle: 'Proveedor y stock',
-                color: AppColors.primario,
-                fondo: const Color(0xFFE8F0FF),
-                onTap: alAbrirCompra,
-              ),
-            if (_administra(negocio, sesion.email))
-              _Acceso(
                 icono: Icons.point_of_sale_rounded,
                 titulo: 'Cierre de caja',
                 detalle: 'Efectivo del día',
@@ -697,13 +865,6 @@ class _Inicio extends StatelessWidget {
               ),
           ],
         ),
-        if (_administra(negocio, sesion.email)) ...[
-          const SizedBox(height: 16),
-          _ResumenCapitalCard(
-            database: database,
-            onTap: alAbrirCapital,
-          ),
-        ],
       ],
     );
   }
@@ -789,10 +950,10 @@ class _Mas extends StatelessWidget {
     required this.alAbrirEquipo,
     required this.alAbrirActividad,
     required this.alAbrirCategorias,
-    required this.alAbrirCompra,
     required this.alAbrirCierre,
     required this.alAbrirPais,
     required this.alCerrarSesion,
+    required this.alBorrarCuenta,
   });
 
   final SesionGoogle sesion;
@@ -808,10 +969,10 @@ class _Mas extends StatelessWidget {
   final VoidCallback alAbrirEquipo;
   final VoidCallback alAbrirActividad;
   final VoidCallback alAbrirCategorias;
-  final VoidCallback alAbrirCompra;
   final VoidCallback alAbrirCierre;
   final VoidCallback alAbrirPais;
   final Future<void> Function() alCerrarSesion;
+  final Future<void> Function() alBorrarCuenta;
 
   @override
   Widget build(BuildContext context) {
@@ -885,8 +1046,6 @@ class _Mas extends StatelessWidget {
                 const Divider(height: 1, indent: 68),
                 _Opcion(icono: Icons.payments_rounded, titulo: 'Capital', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCapital),
                 const Divider(height: 1, indent: 68),
-                _Opcion(icono: Icons.shopping_bag_rounded, titulo: 'Compra', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCompra),
-                const Divider(height: 1, indent: 68),
                 _Opcion(icono: Icons.point_of_sale_rounded, titulo: 'Cierre de caja', color: AppColors.primario, fondo: const Color(0xFFE8F0FF), onTap: alAbrirCierre),
               ],
               const Divider(height: 1, indent: 68),
@@ -915,6 +1074,11 @@ class _Mas extends StatelessWidget {
           onPressed: alCerrarSesion,
           icon: const Icon(Icons.logout, color: AppColors.alerta),
           label: const Text('Cerrar sesión', style: TextStyle(color: AppColors.alerta)),
+        ),
+        TextButton.icon(
+          onPressed: alBorrarCuenta,
+          icon: const Icon(Icons.delete_forever_outlined, color: AppColors.alerta),
+          label: const Text('Borrar cuenta', style: TextStyle(color: AppColors.alerta)),
         ),
       ],
     );

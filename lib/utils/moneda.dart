@@ -24,3 +24,33 @@ String formatearMoneda(double valor, String codigo) {
   if (negativo && cuerpo != '0,00') return '-$iso $cuerpo';
   return '$iso $cuerpo';
 }
+
+/// Lee un importe como se escribe en la app: miles con punto y decimales con coma.
+///
+/// `20.000` y `20.000,00` son 20000. `20,50` y `20.50` son 20,50.
+double? leerMontoEscrito(String raw) {
+  var texto = raw.trim().replaceAll(RegExp(r'\s'), '');
+  if (texto.isEmpty) return null;
+  final negativo = texto.startsWith('-');
+  if (negativo) texto = texto.substring(1);
+  texto = texto.replaceAll(RegExp(r'[^0-9,.]'), '');
+  if (texto.isEmpty) return null;
+
+  final tieneComa = texto.contains(',');
+  final tienePunto = texto.contains('.');
+  if (tieneComa && tienePunto) {
+    if (texto.lastIndexOf(',') > texto.lastIndexOf('.')) {
+      texto = texto.replaceAll('.', '').replaceAll(',', '.');
+    } else {
+      texto = texto.replaceAll(',', '');
+    }
+  } else if (RegExp(r'^\d{1,3}([.,]\d{3})+$').hasMatch(texto)) {
+    texto = texto.replaceAll(RegExp(r'[.,]'), '');
+  } else if (tieneComa) {
+    texto = texto.replaceAll(',', '.');
+  }
+
+  final valor = double.tryParse(texto);
+  if (valor == null || valor.isNaN || valor.isInfinite) return null;
+  return negativo ? -valor : valor;
+}

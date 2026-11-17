@@ -132,6 +132,42 @@ class TiendaPublicaRemota {
     return respuesta == true;
   }
 
+  /// Suma una visita anónima a la página publicada. No guarda quién entró.
+  Future<bool> registrarVisita(String slug) async {
+    final cliente = _clienteActivo();
+    final buscado = slug.trim().toLowerCase();
+    if (cliente == null || buscado.isEmpty) return false;
+    try {
+      await cliente.rpc('registrar_visita_tienda', params: {'p_slug': buscado});
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Visitas de la página de este usuario. Cero si no hay sesión o la función falta.
+  Future<({int hoy, int mes})> visitasDeMiPagina(String slug) async {
+    const vacio = (hoy: 0, mes: 0);
+    final cliente = _clienteActivo();
+    final buscado = slug.trim().toLowerCase();
+    if (cliente == null || cliente.auth.currentUser == null || buscado.isEmpty) {
+      return vacio;
+    }
+    try {
+      final respuesta = await cliente.rpc(
+        'visitas_de_mi_pagina',
+        params: {'p_slug': buscado},
+      );
+      if (respuesta is! List || respuesta.isEmpty || respuesta.first is! Map) {
+        return vacio;
+      }
+      final fila = Map<String, dynamic>.from(respuesta.first as Map);
+      return (hoy: _entero(fila['hoy']) ?? 0, mes: _entero(fila['mes']) ?? 0);
+    } catch (_) {
+      return vacio;
+    }
+  }
+
   Future<TiendaPublica?> buscarPorSlug(String slug) async {
     try {
       final cliente = _clienteActivo();

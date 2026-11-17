@@ -6,7 +6,6 @@ import '../data/capital_repository.dart';
 import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
 import '../utils/moneda.dart';
-import '../widgets/fondo_gexi.dart';
 
 /// Cierre del día: consulta el capital de hoy y lo compara con el efectivo contado.
 ///
@@ -183,92 +182,143 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
         contado == null ? null : totales.diferenciaCentavos(contado);
     final ajuste = contado == null ? null : totales.ajustePara(contado);
 
+    final avisoDiferencia = diferencia == null
+        ? null
+        : diferencia == 0
+            ? 'Coincide con las entradas en efectivo.'
+            : diferencia > 0
+                ? 'Sobra respecto de las entradas en efectivo.'
+                : 'Falta respecto de las entradas en efectivo.';
+    final colorDiferencia = diferencia == null || diferencia == 0
+        ? AppColors.texto
+        : diferencia > 0
+            ? AppColors.verde
+            : AppColors.alerta;
+
     return Scaffold(
       backgroundColor: AppColors.fondoClaro,
-      appBar: AppBar(title: const Text('Cierre de caja')),
-      body: FondoGexi(
-        child: widget.database == null
-            ? const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text(
-                    'No hay base conectada.',
-                    style: TextStyle(color: AppColors.textoSuave),
-                    textAlign: TextAlign.center,
-                  ),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text(
+          'Cierre de caja',
+          style: TextStyle(
+            color: AppColors.texto,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+      body: widget.database == null
+          ? const Center(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'No hay base conectada.',
+                  style: TextStyle(color: AppColors.textoSuave),
+                  textAlign: TextAlign.center,
                 ),
-              )
-            : RefreshIndicator(
-                onRefresh: _cargar,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  children: [
-                    Text(
-                      'Hoy, ${_fecha(DateTime.now())}. Es una consulta: no borra movimientos.',
+              ),
+            )
+          : RefreshIndicator(
+              color: AppColors.primario,
+              onRefresh: _cargar,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
+                    child: Text(
+                      'Hoy, ${_fecha(DateTime.now())}. No borra movimientos.',
                       style: const TextStyle(
                         color: AppColors.textoSuave,
-                        height: 1.35,
+                        fontSize: 13,
                       ),
                     ),
-                    const SizedBox(height: 16),
-                    if (_cargando && _movimientos.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 32),
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else ...[
-                      if (_error != null) ...[
-                        Text(_error!,
-                            style: const TextStyle(color: AppColors.alerta)),
-                        const SizedBox(height: 12),
-                      ],
-                      _Tarjeta(
-                        titulo: 'Totales de hoy',
-                        child: Column(
-                          children: [
-                            _Linea('Entradas', totales.entradas, _codigoMoneda),
-                            _Linea('Salidas', totales.salidas, _codigoMoneda),
-                            _Linea('Cobros', totales.cobros, _codigoMoneda),
-                            _Linea('A cobrar', totales.aCobrar, _codigoMoneda),
-                            _Linea('A pagar', totales.aPagar, _codigoMoneda),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Entradas: tipo entrada, aporte y venta cobrada. Salidas: salida, retiro, gasto y pago de deuda. Cobros: cobros y devoluciones. A cobrar y a pagar son lo cargado hoy, no el saldo de siempre.',
-                              style: TextStyle(
-                                color: AppColors.textoSuave,
-                                fontSize: 12,
-                                height: 1.35,
-                              ),
-                            ),
-                          ],
+                  ),
+                  if (_cargando && _movimientos.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 48),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else ...[
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(color: AppColors.alerta),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      _Tarjeta(
-                        titulo: 'Efectivo',
+                    _titulo('Del día'),
+                    _grupo([
+                      _fila(
+                        Icons.south_west_rounded,
+                        AppColors.verde,
+                        'Entradas',
+                        totales.entradas,
+                      ),
+                      _fila(
+                        Icons.north_east_rounded,
+                        AppColors.alerta,
+                        'Salidas',
+                        totales.salidas,
+                      ),
+                      _fila(
+                        Icons.payments_outlined,
+                        AppColors.primario,
+                        'Cobros',
+                        totales.cobros,
+                      ),
+                      _fila(
+                        Icons.schedule_rounded,
+                        AppColors.pendiente,
+                        'A cobrar',
+                        totales.aCobrar,
+                      ),
+                      _fila(
+                        Icons.account_balance_wallet_outlined,
+                        AppColors.azulProfundo,
+                        'A pagar',
+                        totales.aPagar,
+                      ),
+                    ]),
+                    const SizedBox(height: 22),
+                    _titulo('Efectivo'),
+                    _grupo([
+                      _fila(
+                        Icons.payments_rounded,
+                        AppColors.lima,
+                        'Entradas en efectivo',
+                        totales.entradasEfectivo,
+                      ),
+                      _fila(
+                        Icons.account_balance_outlined,
+                        AppColors.primario,
+                        'Transferencia',
+                        totales.ingresosTransferencia,
+                      ),
+                      _fila(
+                        Icons.more_horiz_rounded,
+                        AppColors.textoSuave,
+                        'Otro medio',
+                        totales.ingresosOtro,
+                      ),
+                      _fila(
+                        Icons.north_east_rounded,
+                        AppColors.alerta,
+                        'Salidas en efectivo',
+                        totales.salidasEfectivo,
+                      ),
+                    ]),
+                    const SizedBox(height: 12),
+                    DecoratedBox(
+                      decoration: AppColors.tarjeta,
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _Linea('Entradas en efectivo',
-                                totales.entradasEfectivo, _codigoMoneda),
-                            _Linea('Entradas por transferencia',
-                                totales.ingresosTransferencia, _codigoMoneda),
-                            _Linea('Entradas por otro medio',
-                                totales.ingresosOtro, _codigoMoneda),
-                            _Linea(
-                                'Salidas en efectivo', totales.salidasEfectivo,
-                                _codigoMoneda),
-                            const SizedBox(height: 8),
-                            const Text(
-                              'La diferencia compara el efectivo contado con las entradas en efectivo. No resta las salidas. Cuenta como efectivo lo que empieza con Efectivo y lo que no dice Transferencia ni Otro. Incluye entradas, aportes, ventas cobradas y cobros en efectivo.',
-                              style: TextStyle(
-                                color: AppColors.textoSuave,
-                                fontSize: 12,
-                                height: 1.35,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
                             TextField(
                               controller: _contado,
                               keyboardType:
@@ -280,6 +330,15 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
                                 prefixIcon: Icon(Icons.payments_outlined),
                               ),
                             ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Se compara con las entradas en efectivo. Las salidas no se restan.',
+                              style: TextStyle(
+                                color: AppColors.textoSuave,
+                                fontSize: 13,
+                                height: 1.35,
+                              ),
+                            ),
                             if (invalido) ...[
                               const SizedBox(height: 8),
                               const Text(
@@ -287,33 +346,43 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
                                 style: TextStyle(color: AppColors.alerta),
                               ),
                             ],
-                            if (diferencia != null) ...[
+                            if (diferencia != null && avisoDiferencia != null) ...[
                               const SizedBox(height: 12),
-                              _Linea(
-                                'Diferencia',
-                                diferencia / 100,
-                                _codigoMoneda,
-                                color: diferencia == 0
-                                    ? AppColors.texto
-                                    : diferencia > 0
-                                        ? AppColors.verde
-                                        : AppColors.alerta,
+                              Row(
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Diferencia',
+                                      style: TextStyle(
+                                        color: AppColors.texto,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    formatearMoneda(
+                                      diferencia / 100,
+                                      _codigoMoneda,
+                                    ),
+                                    style: TextStyle(
+                                      color: colorDiferencia,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                diferencia == 0
-                                    ? 'Coincide con las entradas en efectivo.'
-                                    : diferencia > 0
-                                        ? 'Sobra respecto de las entradas en efectivo.'
-                                        : 'Falta respecto de las entradas en efectivo.',
+                                avisoDiferencia,
                                 style: const TextStyle(
                                   color: AppColors.textoSuave,
-                                  fontSize: 12,
+                                  fontSize: 13,
                                 ),
                               ),
                             ],
                             if (ajuste != null) ...[
-                              const SizedBox(height: 16),
+                              const SizedBox(height: 14),
                               FilledButton(
                                 onPressed:
                                     _guardando ? null : () => _anotar(ajuste),
@@ -327,30 +396,106 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
                           ],
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      _Tarjeta(
-                        titulo: 'Movimientos de hoy',
-                        child: deHoy.isEmpty
-                            ? const Text(
-                                'Hoy no hay movimientos de capital.',
-                                style: TextStyle(color: AppColors.textoSuave),
-                              )
-                            : Column(
-                                children: [
-                                  for (var i = 0; i < deHoy.length; i++) ...[
-                                    if (i > 0) const Divider(height: 16),
-                                    _MovimientoTile(
-                                      movimiento: deHoy[i],
-                                      moneda: _codigoMoneda,
-                                    ),
-                                  ],
-                                ],
+                    ),
+                    const SizedBox(height: 22),
+                    _titulo('Movimientos de hoy'),
+                    _grupo(
+                      deHoy.isEmpty
+                          ? const [
+                              Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 16,
+                                ),
+                                child: Text(
+                                  'Hoy no hay movimientos de capital.',
+                                  style: TextStyle(color: AppColors.textoSuave),
+                                ),
                               ),
-                      ),
-                    ],
+                            ]
+                          : [
+                              for (final movimiento in deHoy)
+                                _MovimientoTile(
+                                  movimiento: movimiento,
+                                  moneda: _codigoMoneda,
+                                ),
+                            ],
+                    ),
                   ],
-                ),
+                ],
               ),
+            ),
+    );
+  }
+
+  Widget _titulo(String texto) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+      child: Text(
+        texto,
+        style: const TextStyle(
+          color: AppColors.textoSuave,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+
+  Widget _grupo(List<Widget> filas) {
+    return DecoratedBox(
+      decoration: AppColors.tarjeta,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Column(
+          children: [
+            for (var i = 0; i < filas.length; i++) ...[
+              if (i > 0)
+                const Divider(height: 1, indent: 68, color: AppColors.linea),
+              filas[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _fila(IconData icono, Color color, String etiqueta, double valor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icono, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              etiqueta,
+              style: const TextStyle(
+                color: AppColors.texto,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              formatearMoneda(valor, _codigoMoneda),
+              textAlign: TextAlign.end,
+              style: const TextStyle(
+                color: AppColors.texto,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -375,56 +520,6 @@ class _CierreCajaScreenState extends State<CierreCajaScreen> {
   }
 }
 
-class _Tarjeta extends StatelessWidget {
-  const _Tarjeta({required this.titulo, required this.child});
-
-  final String titulo;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: AppColors.tarjeta,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(titulo, style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _Linea extends StatelessWidget {
-  const _Linea(this.etiqueta, this.valor, this.moneda, {this.color});
-
-  final String etiqueta;
-  final double valor;
-  final String moneda;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final estilo = Theme.of(context).textTheme.bodyLarge;
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Row(
-        children: [
-          Expanded(child: Text(etiqueta, style: estilo)),
-          const SizedBox(width: 12),
-          Text(
-            formatearMoneda(valor, moneda),
-            style: color == null ? estilo : estilo?.copyWith(color: color),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _MovimientoTile extends StatelessWidget {
   const _MovimientoTile({required this.movimiento, required this.moneda});
 
@@ -436,41 +531,62 @@ class _MovimientoTile extends StatelessWidget {
     final efectivo =
         TotalesCierreCaja.descripcionEsEfectivo(movimiento.descripcion);
     final nota = movimiento.descripcion?.trim();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                TiposCapital.etiqueta(movimiento.tipo),
-                style: const TextStyle(
-                  color: AppColors.texto,
-                  fontWeight: FontWeight.w700,
+    final detalle = (nota == null || nota.isEmpty)
+        ? movimiento.persona
+        : '$nota · ${movimiento.persona}';
+    final color = efectivo ? AppColors.lima : AppColors.primario;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              efectivo ? Icons.payments_rounded : Icons.swap_horiz_rounded,
+              color: color,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  TiposCapital.etiqueta(movimiento.tipo),
+                  style: const TextStyle(
+                    color: AppColors.texto,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 2),
+                Text(
+                  '$detalle · ${efectivo ? 'Efectivo' : 'Otro medio'}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textoSuave,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
             ),
-            Text(
-              formatearMoneda(movimiento.monto, moneda),
-              style: const TextStyle(
-                color: AppColors.texto,
-                fontWeight: FontWeight.w700,
-              ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            formatearMoneda(movimiento.monto, moneda),
+            style: const TextStyle(
+              color: AppColors.texto,
+              fontWeight: FontWeight.w800,
             ),
-          ],
-        ),
-        const SizedBox(height: 2),
-        Text(
-          (nota == null || nota.isEmpty)
-              ? movimiento.persona
-              : '$nota · ${movimiento.persona}',
-          style: const TextStyle(color: AppColors.textoSuave, fontSize: 13),
-        ),
-        Text(
-          efectivo ? 'Efectivo' : 'No es efectivo',
-          style: const TextStyle(color: AppColors.textoSuave, fontSize: 12),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }

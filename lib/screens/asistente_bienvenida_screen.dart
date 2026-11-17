@@ -19,12 +19,14 @@ class AsistenteBienvenidaScreen extends StatefulWidget {
     super.key,
     required this.negocio,
     required this.duenoEmail,
+    this.whatsappInicial = '',
     required this.alActualizar,
     required this.alVolverAlInicio,
   });
 
   final NegocioLocal? negocio;
   final String duenoEmail;
+  final String whatsappInicial;
   final ValueChanged<NegocioLocal> alActualizar;
   final VoidCallback alVolverAlInicio;
 
@@ -180,8 +182,13 @@ class _AsistenteBienvenidaScreenState extends State<AsistenteBienvenidaScreen> {
         _avisar('No se pudo guardar el negocio.');
         return false;
       }
-      _negocio = guardado;
-      widget.alActualizar(guardado);
+      var listo = guardado;
+      final whats = widget.whatsappInicial.trim();
+      if (whats.isNotEmpty && listo.whatsapp.trim().isEmpty) {
+        listo = await NegocioStore().guardarWhatsapp(whats) ?? listo;
+      }
+      _negocio = listo;
+      widget.alActualizar(listo);
       return true;
     } catch (_) {
       if (mounted) _avisar('No se pudo guardar el negocio.');

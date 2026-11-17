@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../data/ampliacion_local.dart';
 import '../data/app_database.dart';
@@ -86,6 +86,152 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
     }
   }
 
+  int get _filtrosActivos {
+    var cantidad = 0;
+    if (_filtroEstado != null) cantidad++;
+    if (_filtroOrigen.isNotEmpty) cantidad++;
+    if (_filtroMedio.isNotEmpty) cantidad++;
+    if (_filtroProducto.trim().isNotEmpty) cantidad++;
+    return cantidad;
+  }
+
+  Future<void> _abrirFiltros() async {
+    final busqueda = TextEditingController(text: _filtroProducto);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.fondoClaro,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, actualizar) {
+            void aplicar(VoidCallback cambio) {
+              setState(cambio);
+              actualizar(() {});
+            }
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                0,
+                16,
+                24 + MediaQuery.viewInsetsOf(context).bottom,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Filtrar ventas',
+                      style: TextStyle(
+                        color: AppColors.texto,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: busqueda,
+                      decoration: const InputDecoration(
+                        labelText: 'Producto o cliente',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (valor) =>
+                          aplicar(() => _filtroProducto = valor),
+                    ),
+                    const SizedBox(height: 14),
+                    _chips(
+                      'Estado',
+                      [
+                        _opcion('Todas', _filtroEstado == null, () {
+                          aplicar(() => _filtroEstado = null);
+                        }),
+                        for (final estado in const [
+                          PedidoEstado.pendiente,
+                          PedidoEstado.pendienteDePago,
+                          PedidoEstado.pagado,
+                          PedidoEstado.confirmado,
+                          PedidoEstado.entregado,
+                        ])
+                          _opcion(estado.etiqueta, _filtroEstado == estado, () {
+                            aplicar(() => _filtroEstado = estado);
+                          }),
+                      ],
+                    ),
+                    _chips(
+                      'Medio',
+                      [
+                        _opcion('Todos', _filtroMedio.isEmpty, () {
+                          aplicar(() => _filtroMedio = '');
+                        }),
+                        for (final medio in MetaPedido.medios)
+                          _opcion(
+                            MetaPedido.etiquetaMedio(medio),
+                            _filtroMedio == medio,
+                            () => aplicar(() => _filtroMedio = medio),
+                          ),
+                        _opcion('Fiado', _filtroMedio == 'fiado', () {
+                          aplicar(() => _filtroMedio = 'fiado');
+                        }),
+                      ],
+                    ),
+                    _chips(
+                      'Origen',
+                      [
+                        for (final origen in const [
+                          '',
+                          'venta',
+                          'local',
+                          'tienda',
+                          'asistente',
+                        ])
+                          _opcion(
+                            _etiquetaOrigen(origen),
+                            _filtroOrigen == origen,
+                            () => aplicar(() => _filtroOrigen = origen),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    busqueda.dispose();
+  }
+
+  Widget _chips(String titulo, List<Widget> opciones) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: const TextStyle(
+              color: AppColors.textoSuave,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: opciones),
+        ],
+      ),
+    );
+  }
+
+  Widget _opcion(String texto, bool elegido, VoidCallback alElegir) {
+    return FilterChip(
+      label: Text(texto),
+      selected: elegido,
+      showCheckmark: false,
+      onSelected: (_) => alElegir(),
+    );
+  }
+
   List<VentaReciente> get _ventasFiltradas {
     final filtro = _filtroEstado;
     final producto = _filtroProducto.trim().toLowerCase();
@@ -118,6 +264,18 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
             fontWeight: FontWeight.w800,
           ),
         ),
+        actions: [
+          if (widget.database != null)
+            IconButton(
+              tooltip: 'Filtrar',
+              onPressed: _abrirFiltros,
+              icon: Badge(
+                isLabelVisible: _filtrosActivos > 0,
+                label: Text('$_filtrosActivos'),
+                child: const Icon(Icons.tune_rounded),
+              ),
+            ),
+        ],
       ),
       body: widget.database == null ? _sinBase() : _conBase(),
     );
@@ -161,104 +319,40 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
             )
           else ...[
             _tituloSeccion('Totales'),
-            const SizedBox(height: 10),
-            _tarjetaPeriodo(
-              titulo: 'Hoy',
-              periodo: _datos.hoy,
-            ),
-            const SizedBox(height: 10),
-            _tarjetaPeriodo(
-              titulo: 'Últimos 7 días',
-              periodo: _datos.ultimos7Dias,
-            ),
-            const SizedBox(height: 10),
-            _tarjetaPeriodo(
-              titulo: 'Mes en curso',
-              periodo: _datos.mesActual,
-            ),
-            const SizedBox(height: 24),
+            _grupo([
+              _filaPeriodo(
+                icono: Icons.today_rounded,
+                titulo: 'Hoy',
+                periodo: _datos.hoy,
+                color: AppColors.primario,
+              ),
+              _filaPeriodo(
+                icono: Icons.date_range_rounded,
+                titulo: 'Últimos 7 días',
+                periodo: _datos.ultimos7Dias,
+                color: AppColors.teal,
+              ),
+              _filaPeriodo(
+                icono: Icons.calendar_month_rounded,
+                titulo: 'Mes en curso',
+                periodo: _datos.mesActual,
+                color: AppColors.lima,
+              ),
+            ]),
+            const SizedBox(height: 22),
             _tituloSeccion('Más vendidos este mes'),
-            const SizedBox(height: 10),
-            _tarjetaTopProductos(_datos.topProductosMes),
-            const SizedBox(height: 24),
+            _grupo(_filasTop(_datos.topProductosMes)),
+            const SizedBox(height: 22),
             _tituloSeccion('Últimas ventas'),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('Todas'),
-                  selected: _filtroEstado == null,
-                  onSelected: (_) => setState(() => _filtroEstado = null),
+            if (_soloAutor != null)
+              const Padding(
+                padding: EdgeInsets.only(left: 4, bottom: 8),
+                child: Text(
+                  'Ves las ventas que registraste con tu usuario.',
+                  style: TextStyle(color: AppColors.textoSuave, fontSize: 13),
                 ),
-                for (final estado in const [
-                  PedidoEstado.pendiente,
-                  PedidoEstado.pendienteDePago,
-                  PedidoEstado.pagado,
-                  PedidoEstado.confirmado,
-                  PedidoEstado.entregado,
-                ])
-                  ChoiceChip(
-                    label: Text(estado.etiqueta),
-                    selected: _filtroEstado == estado,
-                    onSelected: (_) => setState(() => _filtroEstado = estado),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              decoration: const InputDecoration(
-                labelText: 'Producto o cliente',
-                prefixIcon: Icon(Icons.search),
               ),
-              onChanged: (valor) => setState(() => _filtroProducto = valor),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('Todos los medios'),
-                  selected: _filtroMedio.isEmpty,
-                  onSelected: (_) => setState(() => _filtroMedio = ''),
-                ),
-                for (final medio in MetaPedido.medios)
-                  ChoiceChip(
-                    label: Text(MetaPedido.etiquetaMedio(medio)),
-                    selected: _filtroMedio == medio,
-                    onSelected: (_) => setState(() => _filtroMedio = medio),
-                  ),
-                ChoiceChip(
-                  label: const Text('Fiado'),
-                  selected: _filtroMedio == 'fiado',
-                  onSelected: (_) => setState(() => _filtroMedio = 'fiado'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final origen in const ['', 'venta', 'local', 'tienda', 'asistente'])
-                  ChoiceChip(
-                    label: Text(_etiquetaOrigen(origen)),
-                    selected: _filtroOrigen == origen,
-                    onSelected: (_) => setState(() => _filtroOrigen = origen),
-                  ),
-              ],
-            ),
-            if (_soloAutor != null) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'Ves las ventas que registraste con tu usuario.',
-                style: TextStyle(color: AppColors.textoSuave),
-              ),
-            ],
-            const SizedBox(height: 10),
-            _tarjetaUltimas(_ventasFiltradas),
+            _grupo(_filasVentas(_ventasFiltradas)),
           ],
         ],
       ),
@@ -266,57 +360,83 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
   }
 
   Widget _tituloSeccion(String texto) {
-    return Text(
-      texto,
-      style: const TextStyle(
-        color: AppColors.texto,
-        fontWeight: FontWeight.w800,
-        fontSize: 18,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+      child: Text(
+        texto,
+        style: const TextStyle(
+          color: AppColors.textoSuave,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
       ),
     );
   }
 
-  Widget _tarjetaPeriodo({
+  Widget _grupo(List<Widget> filas) {
+    return DecoratedBox(
+      decoration: AppColors.tarjeta,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Column(
+          children: [
+            for (var i = 0; i < filas.length; i++) ...[
+              if (i > 0)
+                const Divider(height: 1, indent: 68, color: AppColors.linea),
+              filas[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _filaPeriodo({
+    required IconData icono,
     required String titulo,
     required TotalesPeriodo periodo,
+    required Color color,
   }) {
     final pedidos = periodo.cantidadPedidos;
-    final etiquetaPedidos =
-        pedidos == 1 ? '1 pedido' : '$pedidos pedidos';
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: AppColors.tarjeta,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final etiquetaPedidos = pedidos == 1 ? '1 pedido' : '$pedidos pedidos';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
         children: [
-          Text(
-            titulo,
-            style: const TextStyle(
-              color: AppColors.textoSuave,
-              fontWeight: FontWeight.w600,
+          _marca(icono, color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: const TextStyle(
+                    color: AppColors.texto,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$etiquetaPedidos · Ganancia ${formatearMoneda(periodo.ganancia, _codigoMoneda)}',
+                  style: const TextStyle(
+                    color: AppColors.textoSuave,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            formatearMoneda(periodo.monto, _codigoMoneda),
-            style: const TextStyle(
-              color: AppColors.texto,
-              fontWeight: FontWeight.w800,
-              fontSize: 22,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            etiquetaPedidos,
-            style: const TextStyle(color: AppColors.textoSuave),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Ganancia ${formatearMoneda(periodo.ganancia, _codigoMoneda)}',
-            style: const TextStyle(
-              color: AppColors.primario,
-              fontWeight: FontWeight.w700,
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              formatearMoneda(periodo.monto, _codigoMoneda),
+              textAlign: TextAlign.end,
+              style: const TextStyle(
+                color: AppColors.texto,
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
             ),
           ),
         ],
@@ -324,149 +444,175 @@ class _ResumenVentasScreenState extends State<ResumenVentasScreen> {
     );
   }
 
-  Widget _tarjetaTopProductos(List<ProductoMasVendido> productos) {
+  Widget _marca(IconData icono, Color color) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      decoration: AppColors.tarjeta,
-      child: productos.isEmpty
-          ? const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                'Todavía no hay unidades vendidas este mes.',
-                style: TextStyle(color: AppColors.textoSuave),
-              ),
-            )
-          : Column(
-              children: [
-                for (var i = 0; i < productos.length; i++) ...[
-                  if (i > 0) const Divider(height: 20, color: AppColors.linea),
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 14,
-                        backgroundColor:
-                            AppColors.primario.withValues(alpha: 0.12),
-                        child: Text(
-                          '${i + 1}',
-                          style: const TextStyle(
-                            color: AppColors.primario,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          productos[i].nombre,
-                          style: const TextStyle(
-                            color: AppColors.texto,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        '${productos[i].unidades} u.',
-                        style: const TextStyle(
-                          color: AppColors.textoSuave,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(icono, color: color, size: 20),
     );
   }
 
-  Widget _tarjetaUltimas(List<VentaReciente> ventas) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-      decoration: AppColors.tarjeta,
-      child: ventas.isEmpty
-          ? const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text(
-                'Todavía no hay ventas para mostrar.',
-                style: TextStyle(color: AppColors.textoSuave),
+  List<Widget> _filasTop(List<ProductoMasVendido> productos) {
+    if (productos.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Text(
+            'Todavía no hay unidades vendidas este mes.',
+            style: TextStyle(color: AppColors.textoSuave),
+          ),
+        ),
+      ];
+    }
+    final maximo = productos.first.unidades;
+    return [
+      for (var i = 0; i < productos.length; i++)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: i == 0
+                    ? AppColors.lima.withValues(alpha: 0.18)
+                    : AppColors.primario.withValues(alpha: 0.1),
+                child: Text(
+                  '${i + 1}',
+                  style: TextStyle(
+                    color: i == 0 ? AppColors.verde : AppColors.primario,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                  ),
+                ),
               ),
-            )
-          : Column(
-              children: [
-                for (var i = 0; i < ventas.length; i++) ...[
-                  if (i > 0) const Divider(height: 20, color: AppColors.linea),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              ventas[i].clienteNombre,
-                              style: const TextStyle(
-                                color: AppColors.texto,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _fechaCorta(ventas[i].fecha),
-                              style: const TextStyle(
-                                color: AppColors.textoSuave,
-                              ),
-                            ),
-                            if (ventas[i].origen.isNotEmpty ||
-                                ventas[i].productos.isNotEmpty)
-                              Text(
-                                [
-                                  if (ventas[i].origen.isNotEmpty)
-                                    _etiquetaOrigen(ventas[i].origen),
-                                  if (ventas[i].productos.isNotEmpty)
-                                    ventas[i].productos,
-                                ].join(' · '),
-                                style: const TextStyle(
-                                  color: AppColors.textoSuave,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            const SizedBox(height: 2),
-                            Text(
-                              formatearMoneda(ventas[i].montoTotal, _codigoMoneda),
-                              style: const TextStyle(
-                                color: AppColors.textoSuave,
-                                fontSize: 12,
-                              ),
-                            ),
-                            if (ventas[i].medioPago.isNotEmpty ||
-                                ventas[i].fiado ||
-                                ventas[i].ganancia != null)
-                              Text(
-                                [
-                                  if (ventas[i].medioPago.isNotEmpty)
-                                    MetaPedido.etiquetaMedio(ventas[i].medioPago),
-                                  if (ventas[i].fiado) 'Fiado',
-                                  if (ventas[i].ganancia != null)
-                                    'Ganancia ${formatearMoneda(ventas[i].ganancia!, _codigoMoneda)}',
-                                ].join(' · '),
-                                style: const TextStyle(
-                                  color: AppColors.textoSuave,
-                                  fontSize: 12,
-                                ),
-                              ),
-                          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      productos[i].nombre,
+                      style: const TextStyle(
+                        color: AppColors.texto,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(99),
+                      child: LinearProgressIndicator(
+                        minHeight: 4,
+                        value: maximo == 0 ? 0 : productos[i].unidades / maximo,
+                        backgroundColor: AppColors.linea,
+                        color: i == 0 ? AppColors.lima : AppColors.primario,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '${productos[i].unidades} u.',
+                style: const TextStyle(
+                  color: AppColors.texto,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+    ];
+  }
+
+  List<Widget> _filasVentas(List<VentaReciente> ventas) {
+    if (ventas.isEmpty) {
+      return const [
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Text(
+            'Todavía no hay ventas para mostrar.',
+            style: TextStyle(color: AppColors.textoSuave),
+          ),
+        ),
+      ];
+    }
+    return [
+      for (final venta in ventas)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      venta.clienteNombre,
+                      style: const TextStyle(
+                        color: AppColors.texto,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      [
+                        _fechaCorta(venta.fecha),
+                        if (venta.origen.isNotEmpty)
+                          _etiquetaOrigen(venta.origen),
+                        if (venta.productos.isNotEmpty) venta.productos,
+                      ].join(' · '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.textoSuave,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (venta.medioPago.isNotEmpty ||
+                        venta.fiado ||
+                        venta.ganancia != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          if (venta.medioPago.isNotEmpty)
+                            MetaPedido.etiquetaMedio(venta.medioPago),
+                          if (venta.fiado) 'Fiado',
+                          if (venta.ganancia != null)
+                            'Ganancia ${formatearMoneda(venta.ganancia!, _codigoMoneda)}',
+                        ].join(' · '),
+                        style: const TextStyle(
+                          color: AppColors.textoSuave,
+                          fontSize: 12,
                         ),
                       ),
-                      _chipEstado(ventas[i].estado),
                     ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    formatearMoneda(venta.montoTotal, _codigoMoneda),
+                    style: const TextStyle(
+                      color: AppColors.texto,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
+                  const SizedBox(height: 6),
+                  _chipEstado(venta.estado),
                 ],
-              ],
-            ),
-    );
+              ),
+            ],
+          ),
+        ),
+    ];
   }
 
   Widget _chipEstado(String estado) {

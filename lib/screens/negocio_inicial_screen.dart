@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../backend/negocio_remoto.dart';
+import '../backend/sesion_remota.dart';
 import '../data/apariencia_tienda.dart';
 import '../services/negocio_local.dart';
 import '../services/propuesta_ia.dart';
+import '../services/sesion_google.dart';
 import '../theme/app_theme.dart';
 import '../widgets/fondo_gexi.dart';
 import '../widgets/logo_gexi.dart';
@@ -16,7 +18,7 @@ class CrearNegocioScreen extends StatefulWidget {
     required this.alUnirse,
   });
 
-  final VoidCallback alEmpezar;
+  final void Function(String whatsapp) alEmpezar;
   final ValueChanged<NegocioLocal> alUnirse;
   final String duenoEmail;
 
@@ -26,17 +28,61 @@ class CrearNegocioScreen extends StatefulWidget {
 
 class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
   final _codigoEmpleado = TextEditingController();
+  final _nombre = TextEditingController();
+  final _apellido = TextEditingController();
+  final _whatsapp = TextEditingController();
   bool _guardando = false;
   String _paso = 'eleccion';
+  String? _error;
 
   @override
   void dispose() {
     _codigoEmpleado.dispose();
+    _nombre.dispose();
+    _apellido.dispose();
+    _whatsapp.dispose();
     super.dispose();
+  }
+
+  String? _validarNombre() {
+    if (_nombre.text.trim().isEmpty) return 'Ingresá tu nombre.';
+    if (_apellido.text.trim().isEmpty) return 'Ingresá tu apellido.';
+    return null;
+  }
+
+  String _nombreCompleto() =>
+      '${_nombre.text.trim()} ${_apellido.text.trim()}';
+
+  String? _validarWhatsapp() {
+    final digitos = _whatsapp.text.replaceAll(RegExp(r'\D'), '');
+    if (digitos.length < 8) return 'Ingresá el WhatsApp del negocio.';
+    return null;
+  }
+
+  String _whatsappListo() {
+    final compacto = _whatsapp.text.trim().replaceAll(RegExp(r'[\s\-()]'), '');
+    final digitos = compacto.replaceAll(RegExp(r'\D'), '');
+    if (compacto.startsWith('+') || digitos.startsWith('54')) return '+$digitos';
+    return '+54$digitos';
+  }
+
+  Future<void> _guardarPersona() async {
+    final completo = _nombreCompleto();
+    await AuthGoogle.instancia.entrarConCorreo(widget.duenoEmail, nombre: completo);
+    await const SesionRemota().guardarPerfil(
+      nombre: _nombre.text.trim(),
+      apellido: _apellido.text.trim(),
+      whatsapp: _paso == 'dueno' ? _whatsappListo() : '',
+    );
   }
 
   Future<void> _entrarConCodigo() async {
     if (_guardando) return;
+    final falta = _validarNombre();
+    if (falta != null) {
+      setState(() => _error = falta);
+      return;
+    }
     final escrito = _codigoEmpleado.text.trim();
     if (escrito.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -51,6 +97,7 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
         negocio = await NegocioStore().unirEmpleado(
           codigo: escrito,
           email: widget.duenoEmail,
+          nombre: _nombreCompleto(),
         );
       } on StateError catch (error) {
         if (!error.message.contains('este dispositivo')) rethrow;
@@ -59,8 +106,13 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
           throw StateError('No encontramos ese código de empleado.');
         }
         await NegocioStore().guardarLocal(remoto);
-        negocio = remoto;
+        negocio = await NegocioStore().unirEmpleado(
+          codigo: escrito,
+          email: widget.duenoEmail,
+          nombre: _nombreCompleto(),
+        );
       }
+      await _guardarPersona();
       if (!mounted) return;
       widget.alUnirse(negocio);
     } on StateError catch (error) {
@@ -88,6 +140,7 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
   Widget build(BuildContext context) {
     final tema = Theme.of(context);
     if (_paso == 'empleado') return _empleado(tema);
+    if (_paso == 'dueno') return _dueno(tema);
     return _eleccion(tema);
   }
 
@@ -118,7 +171,10 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
                 ),
                 const Spacer(),
                 FilledButton(
-                  onPressed: widget.alEmpezar,
+                  onPressed: () => setState(() {
+                    _paso = 'dueno';
+                    _error = null;
+                  }),
                   child: const Text('Crear mi negocio'),
                 ),
                 const SizedBox(height: 12),
@@ -129,6 +185,74 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dueno(ThemeData tema) {
+    return Scaffold(
+      backgroundColor: AppColors.fondoClaro,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        title: const Text('Tu cuenta'),
+      ),
+      body: FondoGexi(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          children: [
+            Text(
+              'Como el negocio es tuyo, necesitamos tu nombre y el WhatsApp donde te escriben los clientes.',
+              style: tema.textTheme.bodyMedium?.copyWith(height: 1.35),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _nombre,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Nombre'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apellido,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Apellido'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _whatsapp,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'WhatsApp',
+                hintText: '11 2345-6789',
+                prefixText: '+54 ',
+              ),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: AppColors.alerta)),
+            ],
+            const SizedBox(height: 24),
+            FilledButton(
+              onPressed: () async {
+                final falta = _validarNombre() ?? _validarWhatsapp();
+                if (falta != null) {
+                  setState(() => _error = falta);
+                  return;
+                }
+                await _guardarPersona();
+                if (!mounted) return;
+                widget.alEmpezar(_whatsappListo());
+              },
+              child: const Text('Continuar'),
+            ),
+            TextButton(
+              onPressed: () => setState(() {
+                _paso = 'eleccion';
+                _error = null;
+              }),
+              child: const Text('Volver'),
+            ),
+          ],
         ),
       ),
     );
@@ -146,10 +270,24 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
           padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
           children: [
             Text(
-              'Ingresá el código que te pasó quien administra. Las ventas y los cobros que hagas quedan a tu nombre.',
+              'Ingresá tu nombre y el código que te pasó quien administra. Las ventas y los cobros que hagas quedan a tu nombre.',
               style: tema.textTheme.bodyMedium?.copyWith(height: 1.35),
             ),
             const SizedBox(height: 20),
+            TextField(
+              controller: _nombre,
+              enabled: !_guardando,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Nombre'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _apellido,
+              enabled: !_guardando,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Apellido'),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: _codigoEmpleado,
               enabled: !_guardando,
@@ -159,6 +297,10 @@ class _CrearNegocioScreenState extends State<CrearNegocioScreen> {
                 hintText: 'AB12CD',
               ),
             ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!, style: const TextStyle(color: AppColors.alerta)),
+            ],
             const SizedBox(height: 24),
             FilledButton(
               onPressed: _guardando ? null : _entrarConCodigo,

@@ -29,6 +29,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _verClave = false;
   bool _creando = false;
   String? _error;
+  String? _aviso;
 
   @override
   void dispose() {
@@ -75,10 +76,25 @@ class _LoginScreenState extends State<LoginScreen> {
       _entrando = true;
       _porCorreo = true;
       _error = null;
+      _aviso = null;
     });
     try {
-      await const SesionRemota().entrarOCrear(correo: correo, clave: clave);
-      await widget.alContinuar(correo);
+      final resultado = _creando
+          ? await const SesionRemota().crearConCorreo(correo: correo, clave: clave)
+          : await const SesionRemota().entrarConClave(correo: correo, clave: clave);
+      if (!mounted) return;
+      if (resultado.entro) {
+        await widget.alContinuar(correo);
+        return;
+      }
+      setState(() {
+        if (_creando && resultado.mensaje.startsWith('Te enviamos')) {
+          _aviso = resultado.mensaje;
+          _creando = false;
+        } else {
+          _error = resultado.mensaje;
+        }
+      });
     } finally {
       if (mounted) setState(() => _entrando = false);
     }
@@ -89,8 +105,8 @@ class _LoginScreenState extends State<LoginScreen> {
     if (partes.length != 2 || partes[0].isEmpty || !partes[1].contains('.')) {
       return 'Ingresá un correo válido.';
     }
-    if (clave.trim().length < 4) {
-      return 'La contraseña necesita al menos 4 caracteres.';
+    if (clave.trim().length < 6) {
+      return 'La contraseña necesita al menos 6 caracteres.';
     }
     return null;
   }
@@ -152,7 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Con Google o con tu correo. Si la cuenta ya existe, entrás directo.',
+                      'Con Google entrás directo. Con correo te mandamos un mail para activar la cuenta.',
                       textAlign: TextAlign.center,
                       style: tema.textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFF6B7280),
@@ -181,6 +197,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       textAlign: TextAlign.center,
                     ),
                   if (!_creando) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'El dueño y el empleado entran con su correo, desde el celular o la computadora.',
+                      textAlign: TextAlign.center,
+                      style: tema.textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFF6B7280),
+                        height: 1.3,
+                      ),
+                    ),
                     const SizedBox(height: 10),
                     const _Modulos(),
                   ],
@@ -208,6 +233,14 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
+                  if (_aviso != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _aviso!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFF0E3154), fontSize: 13, height: 1.35),
+                    ),
+                  ],
                   if (_error != null) ...[
                     const SizedBox(height: 8),
                     Text(
@@ -261,6 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             : () => setState(() {
                                   _creando = !_creando;
                                   _error = null;
+                                  _aviso = null;
                                 }),
                         child: Text(
                           _creando ? 'Ingresar' : 'Crear cuenta',

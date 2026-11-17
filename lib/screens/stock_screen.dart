@@ -38,6 +38,7 @@ class _StockScreenState extends State<StockScreen> {
   bool _cargando = false;
   String? _error;
   int _cargaToken = 0;
+  final _busqueda = TextEditingController();
 
   bool get _usaBase => _repo != null;
   String _codigoMoneda = monedaPorDefecto;
@@ -161,6 +162,7 @@ class _StockScreenState extends State<StockScreen> {
     required double? precioVenta,
     required String propietario,
     String? fotoBase64,
+    required String categoria,
   }) async {
     final repo = _repo;
     final foto = fotoBase64?.trim() ?? '';
@@ -177,6 +179,19 @@ class _StockScreenState extends State<StockScreen> {
         entidad: 'stock',
         detalle: 'Entrada de $cantidad de $nombre',
       );
+      if (categoria.trim().isNotEmpty) {
+        try {
+          await _asignarCategoria(nombre, categoria.trim());
+        } catch (_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('El stock se guardó. No se pudo asignar la categoría.'),
+              ),
+            );
+          }
+        }
+      }
       if (foto.isNotEmpty) {
         try {
           await _adjuntarFotoDeEntrada(nombre, foto);
@@ -230,6 +245,41 @@ class _StockScreenState extends State<StockScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _asignarCategoria(String nombre, String categoria) async {
+    final repo = _repo;
+    if (repo == null) return;
+    final productos = await repo.obtenerProductos();
+    ProductoStock? hallado;
+    for (final producto in productos) {
+      if (producto.nombre.toLowerCase() == nombre.toLowerCase()) {
+        hallado = producto;
+        break;
+      }
+    }
+    final id = hallado?.id;
+    if (id == null) return;
+    final doc = await const AmpliacionLocal().cargar();
+    final actual = doc.fichas[id] ?? const FichaProducto();
+    final elegidas = [
+      for (final item in actual.todas)
+        if (item.toLowerCase() != categoria.toLowerCase()) item,
+      categoria,
+    ];
+    await const AmpliacionLocal().guardarFicha(
+      id,
+      FichaProducto(
+        categoria: elegidas.first,
+        categorias: elegidas,
+        atributos: actual.atributos,
+        controlaStock: actual.controlaStock,
+        visibleEnTienda: actual.visibleEnTienda,
+        umbral: actual.umbral,
+        unidades: actual.unidades,
+        variantes: actual.variantes,
+      ),
+    );
   }
 
   Future<void> _adjuntarFotoDeEntrada(String nombre, String fotoBase64) async {
@@ -355,39 +405,29 @@ class _StockScreenState extends State<StockScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: AppColors.fondoClaro,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(
-          'Gestión de Stock',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16, top: 8),
-            child: ElevatedButton.icon(
-              onPressed: _mostrarAlta,
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text(
-                'Añadir stock',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).primaryColor,
-                shape: const StadiumBorder(),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                textStyle: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-            ),
+        title: const Text(
+          'Stock',
+          style: TextStyle(
+            color: AppColors.texto,
+            fontWeight: FontWeight.w800,
           ),
-        ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'anadir-stock',
+        backgroundColor: AppColors.primario,
+        foregroundColor: Colors.white,
+        elevation: 3,
+        onPressed: _mostrarAlta,
+        icon: const Icon(Icons.add),
+        label: const Text(
+          'Añadir stock',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+        ),
       ),
       body: _buildCuerpo(context),
     );
@@ -406,12 +446,8 @@ class _StockScreenState extends State<StockScreen> {
             children: [
               Text(_error!, textAlign: TextAlign.center),
               const SizedBox(height: 16),
-              ElevatedButton(
+              FilledButton(
                 onPressed: () => _cargar(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).primaryColor,
-                  foregroundColor: Colors.white,
-                ),
                 child: const Text('Reintentar'),
               ),
             ],
@@ -420,118 +456,115 @@ class _StockScreenState extends State<StockScreen> {
       );
     }
 
-    return Card(
-      margin: const EdgeInsets.all(16),
-      color: Theme.of(context).cardColor,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: _productos.isEmpty
-          ? const Padding(
-              padding: EdgeInsets.all(24),
-              child: Text(
-                'No hay productos cargados. Usá «Añadir stock» para registrar el primero.',
+    final bajos = _productos.where(_stockBajo).length;
+    final visibles = _visibles;
+    final buscando = _busqueda.text.trim().isNotEmpty;
+    return Column(
+      children: [
+        if (_productos.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: TextField(
+              controller: _busqueda,
+              textInputAction: TextInputAction.search,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'Buscar producto',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: buscando
+                    ? IconButton(
+                        tooltip: 'Borrar',
+                        onPressed: () {
+                          _busqueda.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.close_rounded),
+                      )
+                    : null,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
               ),
-            )
-          : Scrollbar(
-              child: SingleChildScrollView(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columnSpacing: 24,
-                    dataRowMinHeight: 72,
-                    dataRowMaxHeight: 84,
-                    showCheckboxColumn: false,
-                    headingRowColor: WidgetStatePropertyAll(
-                      Theme.of(context).dividerColor.withValues(alpha: 0.2),
-                    ),
-                    columns: const [
-                      DataColumn(
-                        label: Text(
-                          'Producto',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
+            ),
+          ),
+        Expanded(
+          child: ListView(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
+      children: [
+        if (_productos.isNotEmpty && !buscando) ...[
+          const _TituloStock('Resumen'),
+          DecoratedBox(
+            decoration: AppColors.tarjeta,
+            child: Column(
+              children: [
+                _FilaStock(
+                  icono: Icons.inventory_2_outlined,
+                  color: AppColors.primario,
+                  titulo: 'Productos',
+                  detalle: 'Tocá uno para ver precios y movimientos',
+                  valor: '${_productos.length}',
+                ),
+                const Divider(height: 1, indent: 66, color: AppColors.linea),
+                _FilaStock(
+                  icono: Icons.warning_amber_rounded,
+                  color: bajos == 0 ? AppColors.lima : AppColors.alerta,
+                  titulo: 'Stock bajo',
+                  detalle: bajos == 0
+                      ? 'Ninguno por debajo del mínimo'
+                      : 'Conviene reponer',
+                  valor: '$bajos',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 22),
+        ],
+        const _TituloStock('Productos'),
+        DecoratedBox(
+          decoration: AppColors.tarjeta,
+          child: _productos.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Text(
+                    'Todavía no hay productos. Tocá Añadir stock para cargar el primero.',
+                    style: TextStyle(color: AppColors.textoSuave, height: 1.35),
+                  ),
+                )
+              : visibles.isEmpty
+                  ? const Padding(
+                      padding: EdgeInsets.all(20),
+                      child: Text(
+                        'Ningún producto coincide con la búsqueda.',
+                        style: TextStyle(color: AppColors.textoSuave, height: 1.35),
                       ),
-                      DataColumn(
-                        label: Text(
-                          'Stock total',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                    )
+              : ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < visibles.length; i++) ...[
+                        if (i > 0)
+                          const Divider(
+                            height: 1,
+                            indent: 78,
+                            color: AppColors.linea,
+                          ),
+                        _FilaProducto(
+                          producto: visibles[i],
+                          fotos: _imagenesDe(visibles[i]),
+                          bajo: _stockBajo(visibles[i]),
+                          moneda: _codigoMoneda,
+                          onTap: () => _abrirDetalle(visibles[i]),
+                          onFoto: () => _gestionarImagenes(visibles[i]),
                         ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Tu stock',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Stock de Nildo',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Precio compra',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Precio venta',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
-                    rows: [
-                      for (final producto in _productos)
-                        DataRow(
-                          onSelectChanged: (_) => _abrirDetalle(producto),
-                          cells: [
-                            DataCell(
-                              Row(
-                                children: [
-                                  _CeldaImagen(
-                                    fotos: _imagenesDe(producto),
-                                    onTap: () => _gestionarImagenes(producto),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        producto.nombre,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyLarge
-                                            ?.copyWith(fontWeight: FontWeight.bold),
-                                      ),
-                                      if (_stockBajo(producto))
-                                        const Text(
-                                          'Stock bajo',
-                                          style: TextStyle(
-                                            color: AppColors.alerta,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
-                            DataCell(Text('${producto.stockTotal}')),
-                            DataCell(Text('${producto.stockYo}')),
-                            DataCell(Text('${producto.stockNildo}')),
-                            DataCell(Text(formatearMoneda(producto.precioCompra, _codigoMoneda))),
-                            DataCell(Text(formatearMoneda(producto.precioVenta, _codigoMoneda))),
-                          ],
-                        ),
+                      ],
                     ],
                   ),
                 ),
-              ),
-            ),
+        ),
+      ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -540,6 +573,31 @@ class _StockScreenState extends State<StockScreen> {
     if (ficha != null && !ficha.controlaStock) return false;
     final umbral = ficha?.umbral ?? 2;
     return producto.stockTotal <= umbral;
+  }
+
+  List<ProductoStock> get _visibles {
+    final consulta = _plano(_busqueda.text);
+    if (consulta.isEmpty) return _productos;
+    return [
+      for (final producto in _productos)
+        if (_plano(producto.nombre).contains(consulta)) producto,
+    ];
+  }
+
+  String _plano(String texto) {
+    const origen = 'áéíóúüñ';
+    const destino = 'aeiouun';
+    var salida = texto.trim().toLowerCase();
+    for (var i = 0; i < origen.length; i++) {
+      salida = salida.replaceAll(origen[i], destino[i]);
+    }
+    return salida;
+  }
+
+  @override
+  void dispose() {
+    _busqueda.dispose();
+    super.dispose();
   }
 }
 
@@ -553,13 +611,22 @@ class _CeldaImagen extends StatelessWidget {
   Widget build(BuildContext context) {
     final primera = fotos.isEmpty ? null : bytesDeFotoVidriera(fotos.first);
     if (primera == null) {
-      return TextButton(
-        onPressed: onTap,
-        style: TextButton.styleFrom(
-          visualDensity: VisualDensity.compact,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+      return Material(
+        color: AppColors.limaBrillo,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: const SizedBox(
+            width: 56,
+            height: 56,
+            child: Icon(
+              Icons.add_a_photo_outlined,
+              color: AppColors.primario,
+              size: 22,
+            ),
+          ),
         ),
-        child: const Text('Agregar imagen'),
       );
     }
     return InkWell(
@@ -598,6 +665,171 @@ class _CeldaImagen extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _TituloStock extends StatelessWidget {
+  const _TituloStock(this.texto);
+
+  final String texto;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+      child: Text(
+        texto,
+        style: const TextStyle(
+          color: AppColors.textoSuave,
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+}
+
+class _FilaStock extends StatelessWidget {
+  const _FilaStock({
+    required this.icono,
+    required this.color,
+    required this.titulo,
+    required this.detalle,
+    required this.valor,
+  });
+
+  final IconData icono;
+  final Color color;
+  final String titulo;
+  final String detalle;
+  final String valor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icono, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: const TextStyle(
+                    color: AppColors.texto,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detalle,
+                  style: const TextStyle(color: AppColors.textoSuave, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            valor,
+            style: const TextStyle(
+              color: AppColors.texto,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FilaProducto extends StatelessWidget {
+  const _FilaProducto({
+    required this.producto,
+    required this.fotos,
+    required this.bajo,
+    required this.moneda,
+    required this.onTap,
+    required this.onFoto,
+  });
+
+  final ProductoStock producto;
+  final List<String> fotos;
+  final bool bajo;
+  final String moneda;
+  final VoidCallback onTap;
+  final VoidCallback onFoto;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorCantidad = bajo ? AppColors.alerta : AppColors.texto;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              _CeldaImagen(fotos: fotos, onTap: onFoto),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      producto.nombre,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.texto,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Venta ${formatearMoneda(producto.precioVenta, moneda)}',
+                      style: const TextStyle(
+                        color: AppColors.textoSuave,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (bajo)
+                      const Text(
+                        'Stock bajo',
+                        style: TextStyle(
+                          color: AppColors.alerta,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${producto.stockTotal}',
+                style: TextStyle(
+                  color: colorCantidad,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -841,6 +1073,7 @@ typedef _GuardarEntrada = Future<void> Function({
   required double? precioVenta,
   required String propietario,
   String? fotoBase64,
+  required String categoria,
 });
 
 class _AltaStockDialog extends StatefulWidget {
@@ -857,12 +1090,82 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
   final _cantidadCtrl = TextEditingController();
   final _compraCtrl = TextEditingController();
   final _ventaCtrl = TextEditingController();
-  var _propietario = StockRepository.propietarioYo;
   var _guardando = false;
+  List<String> _categorias = const [];
+  String _categoria = '';
   var _leyendoFoto = false;
   var _generando = false;
   String? _fotoBase64;
   String? _mensajeError;
+
+  @override
+  void initState() {
+    super.initState();
+    _leerCategorias();
+  }
+
+  Future<void> _leerCategorias() async {
+    final negocio = await NegocioStore().leer();
+    if (!mounted) return;
+    setState(() {
+      _categorias = [
+        for (final nombre in negocio?.categorias ?? const <String>[])
+          if (nombre.trim().isNotEmpty) nombre.trim(),
+      ];
+    });
+  }
+
+  Future<void> _nuevaCategoria() async {
+    final campo = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Nueva categoría'),
+        content: TextField(
+          controller: campo,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(labelText: 'Nombre'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Crear'),
+          ),
+        ],
+      ),
+    );
+    final nombre = campo.text.trim();
+    campo.dispose();
+    if (ok != true || nombre.isEmpty || !mounted) return;
+    String? existente;
+    for (final item in _categorias) {
+      if (item.toLowerCase() == nombre.toLowerCase()) existente = item;
+    }
+    if (existente != null) {
+      setState(() => _categoria = existente!);
+      return;
+    }
+    final lista = [..._categorias, nombre];
+    try {
+      await NegocioStore().guardarCatalogo(categorias: lista);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _mensajeError = 'No se pudo crear la categoría.');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _categorias = lista;
+      _categoria = nombre;
+      _mensajeError = null;
+    });
+  }
 
   @override
   void dispose() {
@@ -973,8 +1276,9 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
         cantidad: _parseEntero(_cantidadCtrl.text)!,
         precioCompra: _parseDecimal(_compraCtrl.text)!,
         precioVenta: _parseDecimal(_ventaCtrl.text),
-        propietario: _propietario,
+        propietario: StockRepository.propietarioYo,
         fotoBase64: _fotoBase64,
+        categoria: _categoria,
       );
       if (!mounted) return;
       Navigator.pop(context);
@@ -1029,6 +1333,42 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
               ),
               decoration: const InputDecoration(
                 labelText: 'Precio de venta (opcional)',
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Categoría',
+                style: TextStyle(
+                  color: AppColors.texto,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final nombre in _categorias)
+                    ChoiceChip(
+                      label: Text(nombre),
+                      selected: _categoria.toLowerCase() == nombre.toLowerCase(),
+                      onSelected: _guardando
+                          ? null
+                          : (activa) => setState(
+                                () => _categoria = activa ? nombre : '',
+                              ),
+                    ),
+                  ActionChip(
+                    avatar: const Icon(Icons.add, size: 18),
+                    label: const Text('Nueva'),
+                    onPressed: _guardando ? null : _nuevaCategoria,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 12),
@@ -1091,29 +1431,6 @@ class _AltaStockDialogState extends State<_AltaStockDialog> {
                 ),
               ),
             ],
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _propietario,
-              items: const [
-                DropdownMenuItem(
-                  value: StockRepository.propietarioYo,
-                  child: Text('Yo'),
-                ),
-                DropdownMenuItem(
-                  value: StockRepository.propietarioNildo,
-                  child: Text('Nildo'),
-                ),
-              ],
-              onChanged: _guardando
-                  ? null
-                  : (valor) {
-                      if (valor == null) return;
-                      setState(() => _propietario = valor);
-                    },
-              decoration: const InputDecoration(
-                labelText: 'Propietario del stock',
-              ),
-            ),
             if (_mensajeError != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -1177,7 +1494,6 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
   bool _guardandoPrecios = false;
   bool _guardandoNombre = false;
   bool _guardandoAjuste = false;
-  String _propietario = StockRepository.propietarioYo;
   String _tipo = StockRepository.tipoEntrada;
   String? _errorPrecios;
   String? _errorNombre;
@@ -1342,6 +1658,61 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
     }
   }
 
+  Future<void> _registrarAjusteUnico(
+    StockRepository repo, {
+    required int id,
+    required int cantidad,
+    required String descripcion,
+  }) async {
+    if (_tipo == StockRepository.tipoEntrada) {
+      await repo.registrarAjuste(
+        productoId: id,
+        nombre: _producto.nombre,
+        cantidad: cantidad,
+        propietario: StockRepository.propietarioYo,
+        tipo: StockRepository.tipoEntrada,
+        descripcion: descripcion,
+      );
+      return;
+    }
+    var resto = cantidad;
+    final deYo = resto > _producto.stockYo ? _producto.stockYo : resto;
+    resto -= deYo;
+    if (deYo > 0) {
+      await repo.registrarAjuste(
+        productoId: id,
+        nombre: _producto.nombre,
+        cantidad: deYo,
+        propietario: StockRepository.propietarioYo,
+        tipo: StockRepository.tipoSalida,
+        descripcion: descripcion,
+      );
+    }
+    if (resto > 0) {
+      await repo.registrarAjuste(
+        productoId: id,
+        nombre: _producto.nombre,
+        cantidad: resto,
+        propietario: StockRepository.propietarioNildo,
+        tipo: StockRepository.tipoSalida,
+        descripcion: descripcion,
+      );
+    }
+  }
+
+  ProductoStock _aplicarAjusteLocal(int cantidad) {
+    if (_tipo == StockRepository.tipoEntrada) {
+      return _producto.copyWith(stockYo: _producto.stockYo + cantidad);
+    }
+    var resto = cantidad;
+    final deYo = resto > _producto.stockYo ? _producto.stockYo : resto;
+    resto -= deYo;
+    return _producto.copyWith(
+      stockYo: _producto.stockYo - deYo,
+      stockNildo: _producto.stockNildo - resto,
+    );
+  }
+
   Future<void> _guardarAjuste() async {
     final cantidad = _parseEntero(_cantidadCtrl.text);
     if (cantidad == null || cantidad <= 0) {
@@ -1350,9 +1721,7 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
       });
       return;
     }
-    final esYo = _propietario == StockRepository.propietarioYo;
-    final disponible = esYo ? _producto.stockYo : _producto.stockNildo;
-    if (_tipo == StockRepository.tipoSalida && cantidad > disponible) {
+    if (_tipo == StockRepository.tipoSalida && cantidad > _producto.stockTotal) {
       setState(() {
         _errorAjuste = 'No hay stock suficiente para esa salida.';
       });
@@ -1367,12 +1736,10 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
       final repo = widget.repositorio;
       final id = _producto.id;
       if (repo != null && id != null) {
-        await repo.registrarAjuste(
-          productoId: id,
-          nombre: _producto.nombre,
+        await _registrarAjusteUnico(
+          repo,
+          id: id,
           cantidad: cantidad,
-          propietario: _propietario,
-          tipo: _tipo,
           descripcion: _descripcionCtrl.text,
         );
         final fresco = await repo.obtenerPorId(id);
@@ -1390,11 +1757,7 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
         return;
       }
 
-      final delta = _tipo == StockRepository.tipoEntrada ? cantidad : -cantidad;
-      final actualizado = _producto.copyWith(
-        stockYo: esYo ? _producto.stockYo + delta : _producto.stockYo,
-        stockNildo: esYo ? _producto.stockNildo : _producto.stockNildo + delta,
-      );
+      final actualizado = _aplicarAjusteLocal(cantidad);
       if (!mounted) return;
       setState(() {
         _producto = actualizado;
@@ -1414,17 +1777,43 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
     }
   }
 
+  Widget _datoDetalle(String titulo, String valor, {bool fuerte = false}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              titulo,
+              style: const TextStyle(color: AppColors.textoSuave, fontSize: 14),
+            ),
+          ),
+          Text(
+            valor,
+            style: TextStyle(
+              color: AppColors.texto,
+              fontWeight: fuerte ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final usaBase = widget.repositorio != null;
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: AppColors.fondoClaro,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'Detalle: ${_producto.nombre}',
-          style: Theme.of(context).textTheme.titleLarge,
+          _producto.nombre,
+          style: const TextStyle(
+            color: AppColors.texto,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ),
       body: SingleChildScrollView(
@@ -1471,23 +1860,16 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                        'Precio de compra: ${formatearMoneda(_producto.precioCompra, _codigoMoneda)}'),
-                    Text('Precio de venta: ${formatearMoneda(_producto.precioVenta, _codigoMoneda)}'),
-                    Text('Tu stock: ${_producto.stockYo}'),
-                    Text('Stock de Nildo: ${_producto.stockNildo}'),
-                    Text(
-                      'Stock total: ${_producto.stockTotal}',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    const SizedBox(height: 12),
+                    _datoDetalle(
+                      'Costo',
+                      formatearMoneda(_producto.precioCompra, _codigoMoneda),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      usaBase
-                          ? 'Los cambios se guardan en este dispositivo. Si el negocio está en la nube, también se copian ahí.'
-                          : 'Modo demostración: los cambios quedan solo en memoria.',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                    _datoDetalle(
+                      'Venta',
+                      formatearMoneda(_producto.precioVenta, _codigoMoneda),
                     ),
+                    _datoDetalle('Stock', '${_producto.stockTotal}', fuerte: true),
                   ],
                 ),
               ),
@@ -1577,29 +1959,6 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      initialValue: _propietario,
-                      decoration: const InputDecoration(
-                        labelText: 'Propietario',
-                      ),
-                      items: const [
-                        DropdownMenuItem(
-                          value: StockRepository.propietarioYo,
-                          child: Text('Yo'),
-                        ),
-                        DropdownMenuItem(
-                          value: StockRepository.propietarioNildo,
-                          child: Text('Nildo'),
-                        ),
-                      ],
-                      onChanged: _guardandoAjuste
-                          ? null
-                          : (valor) {
-                              if (valor == null) return;
-                              setState(() => _propietario = valor);
-                            },
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
                       initialValue: _tipo,
                       decoration: const InputDecoration(
                         labelText: 'Tipo de movimiento',
@@ -1684,20 +2043,57 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
                     else if (_movimientos.isEmpty)
                       const Text('Todavía no hay movimientos.')
                     else
-                      for (final movimiento in _movimientos) ...[
-                        Text(
-                          '${_etiquetaTipo(movimiento.tipo)} · ${movimiento.cantidad} · ${movimiento.propietario}',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                      for (final movimiento in _movimientos)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Row(
+                            children: [
+                              Icon(
+                                movimiento.tipo == StockRepository.tipoSalida
+                                    ? Icons.south_west_rounded
+                                    : Icons.north_east_rounded,
+                                size: 18,
+                                color: movimiento.tipo == StockRepository.tipoSalida
+                                    ? AppColors.alerta
+                                    : AppColors.lima,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${_etiquetaTipo(movimiento.tipo)} · ${movimiento.propietario}',
+                                      style: const TextStyle(
+                                        color: AppColors.texto,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    Text(
+                                      [
+                                        _fecha(movimiento.fechaCarga),
+                                        if (movimiento.descripcion != null &&
+                                            movimiento.descripcion!.isNotEmpty)
+                                          movimiento.descripcion!,
+                                      ].join(' · '),
+                                      style: const TextStyle(
+                                        color: AppColors.textoSuave,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Text(
+                                '${movimiento.cantidad}',
+                                style: const TextStyle(
+                                  color: AppColors.texto,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        if (movimiento.descripcion != null &&
-                            movimiento.descripcion!.isNotEmpty)
-                          Text(movimiento.descripcion!),
-                        Text(
-                          _fecha(movimiento.fechaCarga),
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                        const SizedBox(height: 12),
-                      ],
                   ],
                 ),
               ),
@@ -1732,11 +2128,19 @@ String _etiquetaTipo(String tipo) {
 }
 
 String _textoPrecio(double valor) {
-  final texto = valor.toStringAsFixed(2);
-  if (texto.endsWith('.00')) {
-    return texto.substring(0, texto.length - 3);
+  if (!valor.isFinite) return '';
+  final entero = valor == valor.roundToDouble();
+  final fijo = valor.abs().toStringAsFixed(entero ? 0 : 2);
+  final punto = fijo.indexOf('.');
+  final entera = punto < 0 ? fijo : fijo.substring(0, punto);
+  final decimales = punto < 0 ? '' : fijo.substring(punto + 1);
+  final miles = StringBuffer();
+  for (var i = 0; i < entera.length; i++) {
+    if (i > 0 && (entera.length - i) % 3 == 0) miles.write('.');
+    miles.write(entera[i]);
   }
-  return texto;
+  final cuerpo = decimales.isEmpty ? miles.toString() : '${miles.toString()},$decimales';
+  return valor < 0 ? '-$cuerpo' : cuerpo;
 }
 
 String _fecha(DateTime fecha) {
@@ -1752,8 +2156,4 @@ int? _parseEntero(String texto) {
   return int.tryParse(limpio);
 }
 
-double? _parseDecimal(String texto) {
-  final limpio = texto.trim().replaceAll(',', '.');
-  if (limpio.isEmpty) return null;
-  return double.tryParse(limpio);
-}
+double? _parseDecimal(String texto) => leerMontoEscrito(texto);

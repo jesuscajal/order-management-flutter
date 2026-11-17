@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:drift/drift.dart' hide Column;
@@ -14,7 +14,7 @@ import '../services/negocio_local.dart';
 import '../theme/app_theme.dart';
 import '../utils/moneda.dart';
 
-enum FiltroClientes { todos, activos, potenciales }
+enum FiltroClientes { todos, activos, potenciales, deuda }
 
 InputDecoration _decoracionTelefono(
   PaisLatam? pais, {
@@ -59,6 +59,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
   bool _saldoNoDisponible = false;
   String _codigoMoneda = monedaPorDefecto;
   PaisLatam? _pais;
+  final _busqueda = TextEditingController();
 
   @override
   void initState() {
@@ -139,29 +140,6 @@ class _ClientsScreenState extends State<ClientsScreen> {
     };
   }
 
-  Widget _bloqueSaldo(String nombre) {
-    final String texto;
-    final Color color;
-    if (_saldoNoDisponible) {
-      texto = 'Saldo a cobrar: no se pudo calcular';
-      color = AppColors.textoSuave;
-    } else {
-      final saldo = _saldosPorNombre?[nombre.trim().toLowerCase()] ?? 0;
-      texto = 'Saldo a cobrar: ${formatearMoneda(saldo, _codigoMoneda)}';
-      color = saldo > 0 ? AppColors.alerta : AppColors.verde;
-    }
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Text(
-        texto,
-        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: color,
-              fontWeight: FontWeight.w700,
-            ),
-      ),
-    );
-  }
-
   Future<Map<String, String>> _leerCompras() async {
     final pedidos = await PedidoRepository(widget.database).listarPedidos();
     final grupos = <String, List<String>>{};
@@ -181,27 +159,76 @@ class _ClientsScreenState extends State<ClientsScreen> {
     };
   }
 
-  List<models.Cliente> get _clientesFiltrados {
-    switch (_filtroActual) {
-      case FiltroClientes.activos:
-        return _clientes.where((c) => !c.esPotencial).toList();
-      case FiltroClientes.potenciales:
-        return _clientes.where((c) => c.esPotencial).toList();
-      case FiltroClientes.todos:
-      default:
-        return _clientes;
-    }
+  @override
+  void dispose() {
+    _busqueda.dispose();
+    super.dispose();
   }
 
-  Color _getColorEstado(models.EstadoPago estado, BuildContext context) {
-    switch (estado) {
-      case models.EstadoPago.pagado:
-        return Colors.green;
-      case models.EstadoPago.senalado:
-        return Colors.orange;
-      case models.EstadoPago.pendiente:
-        return Colors.red;
+  List<models.Cliente> get _clientesFiltrados {
+    Iterable<models.Cliente> base = _clientes;
+    switch (_filtroActual) {
+      case FiltroClientes.activos:
+        base = base.where((c) => !c.esPotencial);
+        break;
+      case FiltroClientes.potenciales:
+        base = base.where((c) => c.esPotencial);
+        break;
+      case FiltroClientes.deuda:
+        base = base.where((c) => _saldoDe(c.nombre) > 0);
+        break;
+      case FiltroClientes.todos:
+        break;
     }
+    final consulta = _plano(_busqueda.text);
+    if (consulta.isEmpty) return base.toList();
+    return [
+      for (final cliente in base)
+        if (_plano(
+          '${cliente.nombre} ${cliente.contacto} ${cliente.email ?? ''} ${cliente.notas ?? ''}',
+        ).contains(consulta))
+          cliente,
+    ];
+  }
+
+  double _saldoDe(String nombre) {
+    if (_saldoNoDisponible) return 0;
+    return _saldosPorNombre?[nombre.trim().toLowerCase()] ?? 0;
+  }
+
+  String _plano(String texto) {
+    const origen = 'áéíóúüñ';
+    const destino = 'aeiouun';
+    var salida = texto.trim().toLowerCase();
+    for (var i = 0; i < origen.length; i++) {
+      salida = salida.replaceAll(origen[i], destino[i]);
+    }
+    return salida;
+  }
+
+  String _etiquetaFiltro(FiltroClientes filtro) {
+    return switch (filtro) {
+      FiltroClientes.todos => 'Todos',
+      FiltroClientes.activos => 'Activos',
+      FiltroClientes.potenciales => 'Potenciales',
+      FiltroClientes.deuda => 'Deben',
+    };
+  }
+
+  String _etiquetaEstado(models.EstadoPago estado) {
+    return switch (estado) {
+      models.EstadoPago.pagado => 'Pagado',
+      models.EstadoPago.senalado => 'Señado',
+      models.EstadoPago.pendiente => 'Pendiente',
+    };
+  }
+
+  Color _colorEstado(models.EstadoPago estado) {
+    return switch (estado) {
+      models.EstadoPago.pagado => AppColors.verde,
+      models.EstadoPago.senalado => AppColors.pendiente,
+      models.EstadoPago.pendiente => AppColors.alerta,
+    };
   }
 
   Future<void> _seleccionarContacto(
@@ -494,7 +521,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
             mainAxisSize: MainAxisSize.min,
             children: models.EstadoPago.values.map((estado) {
               return RadioListTile<models.EstadoPago>(
-                title: Text(estado.toString().split('.').last),
+                title: Text(_etiquetaEstado(estado)),
                 value: estado,
                 groupValue: nuevoEstado,
                 onChanged: (value) {
@@ -604,377 +631,396 @@ class _ClientsScreenState extends State<ClientsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final visibles = _clientesFiltrados;
+    final buscando = _busqueda.text.trim().isNotEmpty;
+    final deben = _clientes.where((c) => _saldoDe(c.nombre) > 0).length;
+    final potenciales = _clientes.where((c) => c.esPotencial).length;
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: AppColors.fondoClaro,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(
+        title: const Text(
           'Clientes',
-          style: Theme.of(context).textTheme.titleLarge,
+          style: TextStyle(
+            color: AppColors.texto,
+            fontWeight: FontWeight.w800,
+          ),
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: DropdownButton<FiltroClientes>(
-              value: _filtroActual,
-              items: FiltroClientes.values.map((filtro) {
-                return DropdownMenuItem(
-                  value: filtro,
-                  child: Text(
-                    filtro.toString().split('.').last,
-                    style: const TextStyle(color: AppColors.texto),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'anadir-cliente',
+        backgroundColor: AppColors.primario,
+        foregroundColor: Colors.white,
+        elevation: 3,
+        onPressed: _mostrarDialogoNuevoCliente,
+        icon: const Icon(Icons.add),
+        label: const Text(
+          'Añadir cliente',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+        ),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                if (_clientes.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                    child: TextField(
+                      controller: _busqueda,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Buscar cliente',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: buscando
+                            ? IconButton(
+                                tooltip: 'Borrar',
+                                onPressed: () {
+                                  _busqueda.clear();
+                                  setState(() {});
+                                },
+                                icon: const Icon(Icons.close_rounded),
+                              )
+                            : null,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
                   ),
-                );
-              }).toList(),
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() => _filtroActual = value);
-                }
-              },
+                if (_clientes.isNotEmpty)
+                  SizedBox(
+                    height: 52,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                      children: [
+                        for (final filtro in FiltroClientes.values)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(_etiquetaFiltro(filtro)),
+                              selected: _filtroActual == filtro,
+                              onSelected: (_) =>
+                                  setState(() => _filtroActual = filtro),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _cargarClientes,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+                      children: [
+                        if (_clientes.isNotEmpty && !buscando) ...[
+                          DecoratedBox(
+                            decoration: AppColors.tarjeta,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              child: Row(
+                                children: [
+                                  _datoResumen('Clientes', '${_clientes.length}'),
+                                  _datoResumen('Deben', '$deben'),
+                                  _datoResumen('Potenciales', '$potenciales'),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
+                        DecoratedBox(
+                          decoration: AppColors.tarjeta,
+                          child: _clientes.isEmpty
+                              ? const Padding(
+                                  padding: EdgeInsets.all(20),
+                                  child: Text(
+                                    'Todavía no hay clientes. Tocá Añadir cliente para cargar el primero.',
+                                    style: TextStyle(
+                                      color: AppColors.textoSuave,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                )
+                              : visibles.isEmpty
+                                  ? Padding(
+                                      padding: const EdgeInsets.all(20),
+                                      child: Text(
+                                        buscando
+                                            ? 'Ningún cliente coincide con la búsqueda.'
+                                            : 'No hay clientes en este filtro.',
+                                        style: const TextStyle(
+                                          color: AppColors.textoSuave,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    )
+                                  : ClipRRect(
+                                      borderRadius: BorderRadius.circular(18),
+                                      child: Column(
+                                        children: [
+                                          for (var i = 0; i < visibles.length; i++) ...[
+                                            if (i > 0)
+                                              const Divider(
+                                                height: 1,
+                                                indent: 66,
+                                                color: AppColors.linea,
+                                              ),
+                                            _filaCliente(visibles[i]),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _datoResumen(String titulo, String valor) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            valor,
+            style: const TextStyle(
+              color: AppColors.texto,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            titulo,
+            style: const TextStyle(color: AppColors.textoSuave, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filaCliente(models.Cliente cliente) {
+    final saldo = _saldoDe(cliente.nombre);
+    final inicial = cliente.nombre.trim().isEmpty
+        ? '?'
+        : cliente.nombre.trim()[0].toUpperCase();
+    final detalle = cliente.contacto.isEmpty ? 'Sin teléfono' : cliente.contacto;
+    return InkWell(
+      onTap: () => _abrirCliente(cliente),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: cliente.esPotencial
+                  ? AppColors.limaBrillo
+                  : const Color(0xFFE8EEFF),
+              child: Text(
+                inicial,
+                style: TextStyle(
+                  color: cliente.esPotencial ? AppColors.verde : AppColors.primario,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    cliente.nombre,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.texto,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    cliente.esPotencial ? 'Potencial · $detalle' : detalle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppColors.textoSuave, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (saldo > 0)
+              Text(
+                formatearMoneda(saldo, _codigoMoneda),
+                style: const TextStyle(
+                  color: AppColors.alerta,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              )
+            else
+              Text(
+                _etiquetaEstado(cliente.estadoPago),
+                style: TextStyle(
+                  color: _colorEstado(cliente.estadoPago),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _abrirCliente(models.Cliente cliente) async {
+    final saldo = _saldoDe(cliente.nombre);
+    final compras =
+        _comprasPorNombre[cliente.nombre.trim().toLowerCase()] ?? '';
+    final esTelefono = cliente.contacto.isNotEmpty &&
+        RegExp(r'^\+?[\d\s-]{8,}$').hasMatch(cliente.contacto);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheet) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+            padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.linea,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 16, 12, 4),
+                  child: Text(
+                    cliente.nombre,
+                    style: const TextStyle(
+                      color: AppColors.texto,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                    ),
+                  ),
+                ),
+                if (cliente.contacto.isNotEmpty)
+                  _lineaFicha(Icons.phone_outlined, cliente.contacto),
+                if ((cliente.email ?? '').isNotEmpty)
+                  _lineaFicha(Icons.mail_outline, cliente.email!),
+                if ((cliente.notas ?? '').isNotEmpty)
+                  _lineaFicha(Icons.notes_rounded, cliente.notas!),
+                _lineaFicha(
+                  Icons.payments_outlined,
+                  _saldoNoDisponible
+                      ? 'Saldo a cobrar: no se pudo calcular'
+                      : 'Saldo a cobrar: ${formatearMoneda(saldo, _codigoMoneda)}',
+                ),
+                if (compras.isNotEmpty) _lineaFicha(Icons.shopping_bag_outlined, compras),
+                const Divider(height: 16, color: AppColors.linea),
+                if (esTelefono)
+                  ListTile(
+                    leading: const FaIcon(FontAwesomeIcons.whatsapp, color: AppColors.verde),
+                    title: const Text('WhatsApp'),
+                    onTap: () async {
+                      Navigator.pop(sheet);
+                      final phone = cliente.contacto.replaceAll(RegExp(r'[^\d]'), '');
+                      final url = Uri.parse('https://wa.me/$phone');
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url, mode: LaunchMode.externalApplication);
+                      }
+                    },
+                  ),
+                if (esTelefono)
+                  ListTile(
+                    leading: const Icon(Icons.call_outlined, color: AppColors.primario),
+                    title: const Text('Llamar'),
+                    onTap: () async {
+                      Navigator.pop(sheet);
+                      final phone = cliente.contacto.replaceAll(RegExp(r'[^\d+]'), '');
+                      final url = Uri.parse('tel:$phone');
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url);
+                      }
+                    },
+                  ),
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined, color: AppColors.primario),
+                  title: const Text('Editar'),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    _mostrarDialogoEditar(cliente);
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.flag_outlined, color: _colorEstado(cliente.estadoPago)),
+                  title: Text('Estado: ${_etiquetaEstado(cliente.estadoPago)}'),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    _mostrarDialogoActualizarEstado(cliente);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: AppColors.alerta),
+                  title: const Text('Eliminar'),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    _mostrarDialogoEliminar(cliente);
+                  },
+                ),
+              ],
+            ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _lineaFicha(IconData icono, String texto) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icono, size: 18, color: AppColors.textoSuave),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              texto,
+              style: const TextStyle(color: AppColors.texto, height: 1.3),
             ),
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _clientesFiltrados.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.people_outline,
-                        size: 64,
-                        color:
-                            Theme.of(context).iconTheme.color?.withOpacity(0.3),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        _filtroActual == FiltroClientes.potenciales
-                            ? 'No hay clientes potenciales aún'
-                            : 'No hay clientes',
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              color:
-                                  Theme.of(context).textTheme.bodyMedium?.color,
-                            ),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _clientesFiltrados.length,
-                  itemBuilder: (context, index) {
-                    final cliente = _clientesFiltrados[index];
-                    final tieneContacto = cliente.contacto.isNotEmpty;
-                    final isPhone = tieneContacto &&
-                        RegExp(r'^\+?[\d\s-]{8,}$').hasMatch(cliente.contacto);
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      elevation: 2,
-                      color: cliente.esPotencial
-                          ? Theme.of(context).primaryColor.withOpacity(0.08)
-                          : Theme.of(context).cardColor,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(8),
-                                            decoration: BoxDecoration(
-                                              color: Theme.of(context)
-                                                  .primaryColor
-                                                  .withOpacity(0.08),
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Icon(
-                                              Icons.person,
-                                              color: Theme.of(context)
-                                                  .iconTheme
-                                                  .color,
-                                              size: 24,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              cliente.nombre,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleLarge,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      if (tieneContacto && isPhone)
-                                        GestureDetector(
-                                          onTap: () async {
-                                            final phone = cliente.contacto
-                                                .replaceAll(
-                                                    RegExp(r'[^\d]'), '');
-                                            final url = Uri.parse(
-                                                'https://wa.me/$phone');
-                                            if (await canLaunchUrl(url)) {
-                                              await launchUrl(url,
-                                                  mode: LaunchMode
-                                                      .externalApplication);
-                                            }
-                                          },
-                                          child: Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.center,
-                                            children: [
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.all(8),
-                                                decoration: BoxDecoration(
-                                                  color: AppColors.teal
-                                                      .withOpacity(0.12),
-                                                  borderRadius:
-                                                      BorderRadius.circular(12),
-                                                ),
-                                                child: FaIcon(
-                                                  FontAwesomeIcons.whatsapp,
-                                                  color: Theme.of(context)
-                                                              .brightness ==
-                                                          Brightness.dark
-                                                      ? AppColors.lima
-                                                      : AppColors.verde,
-                                                  size: 22,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Text(
-                                                cliente.contacto,
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodyLarge,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      if (tieneContacto && !isPhone)
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: Theme.of(context)
-                                                    .iconTheme
-                                                    .color
-                                                    ?.withOpacity(0.08),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: Icon(
-                                                Icons.phone,
-                                                color: Theme.of(context)
-                                                    .iconTheme
-                                                    .color,
-                                                size: 20,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Text(
-                                              cliente.contacto,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodyLarge,
-                                            ),
-                                          ],
-                                        ),
-                                      if (cliente.email != null) ...[
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: Theme.of(context)
-                                                    .iconTheme
-                                                    .color
-                                                    ?.withOpacity(0.08),
-                                                borderRadius:
-                                                    BorderRadius.circular(12),
-                                              ),
-                                              child: Icon(
-                                                Icons.email,
-                                                color: Theme.of(context)
-                                                    .iconTheme
-                                                    .color,
-                                                size: 20,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Text(
-                                                cliente.email!,
-                                                style: Theme.of(context)
-                                                    .textTheme
-                                                    .bodyMedium,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Container(
-                                      alignment: Alignment.topCenter,
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: _getColorEstado(
-                                                cliente.estadoPago, context)
-                                            .withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(20),
-                                        border: Border.all(
-                                          color: _getColorEstado(
-                                              cliente.estadoPago, context),
-                                          width: 1,
-                                        ),
-                                      ),
-                                      child: Text(
-                                        cliente.estadoPago
-                                            .toString()
-                                            .split('.')
-                                            .last,
-                                        style: TextStyle(
-                                          color: _getColorEstado(
-                                              cliente.estadoPago, context),
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            if (cliente.notas != null) ...[
-                              const SizedBox(height: 12),
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context)
-                                      .iconTheme
-                                      .color
-                                      ?.withOpacity(0.05),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(
-                                      Icons.note,
-                                      color: Theme.of(context).iconTheme.color,
-                                      size: 16,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        cliente.notas!,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                            _bloqueSaldo(cliente.nombre),
-                            if ((_comprasPorNombre[cliente.nombre.trim().toLowerCase()] ?? '')
-                                .isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Text(
-                                  'Compras: ${_comprasPorNombre[cliente.nombre.trim().toLowerCase()]}',
-                                  style: const TextStyle(color: AppColors.textoSuave),
-                                ),
-                              ),
-                            const SizedBox(height: 12),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    TextButton(
-                                      onPressed: () =>
-                                          _mostrarDialogoEditar(cliente),
-                                      child: const Text('Editar'),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    ElevatedButton.icon(
-                                      onPressed: () =>
-                                          _mostrarDialogoActualizarEstado(
-                                              cliente),
-                                      icon: const Icon(Icons.update, size: 16),
-                                      label: const Text('Estado'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Theme.of(context)
-                                            .primaryColor
-                                            .withOpacity(0.1),
-                                        foregroundColor:
-                                            Theme.of(context).primaryColor,
-                                        elevation: 0,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(12),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                IconButton(
-                                  onPressed: () =>
-                                      _mostrarDialogoEliminar(cliente),
-                                  icon: const Icon(Icons.delete),
-                                  color: Colors.red,
-                                  style: IconButton.styleFrom(
-                                    backgroundColor:
-                                        Colors.red.withOpacity(0.1),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _mostrarDialogoNuevoCliente,
-        child: const Icon(Icons.add),
-      ),
     );
   }
+
+
 }
 
 // Widget separado para búsqueda de contactos optimizada

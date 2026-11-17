@@ -4,6 +4,7 @@ import '../data/ampliacion_local.dart';
 import '../data/app_database.dart';
 import '../data/pedido_repository.dart';
 import '../data/stock_repository.dart';
+import '../utils/moneda.dart';
 import 'negocio_contexto.dart';
 import 'openai_chat_service.dart';
 
@@ -1173,26 +1174,7 @@ bool _precioValido(double valor) {
   return !valor.isNaN && !valor.isInfinite && valor >= 0;
 }
 
-double? _parsePrecio(String raw) {
-  var texto = raw.trim().replaceAll(RegExp(r'[^0-9,.\-]'), '');
-  if (texto.isEmpty || texto == '-' || texto == ',' || texto == '.') {
-    return null;
-  }
-  final negativo = texto.startsWith('-');
-  texto = texto.replaceAll('-', '');
-  if (texto.contains(',') && texto.contains('.')) {
-    if (texto.lastIndexOf(',') > texto.lastIndexOf('.')) {
-      texto = texto.replaceAll('.', '').replaceAll(',', '.');
-    } else {
-      texto = texto.replaceAll(',', '');
-    }
-  } else if (texto.contains(',')) {
-    texto = texto.replaceAll(',', '.');
-  }
-  final valor = double.tryParse(texto);
-  if (valor == null) return null;
-  return negativo ? -valor : valor;
-}
+double? _parsePrecio(String raw) => leerMontoEscrito(raw);
 
 String _precio(double valor) {
   final texto = valor.toStringAsFixed(2).replaceAll('.', ',');
